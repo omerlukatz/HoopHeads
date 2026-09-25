@@ -1,0 +1,1973 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Hoop Head</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Fraunces:opsz,wght@9..144,500..700&family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#F2E6D2;
+    --cream-soft:#FBF3E6;
+    --paper:#FFFCF5;
+    --ink:#241a12;
+    --brown:#6B4226;
+    --brown-deep:#3E2414;
+    --orange:#E2611C;
+    --orange-light:#F2A44D;
+    --black:#17110B;
+    --good:#4C7A3D;
+    --good-soft:#E3EDD9;
+    --bad:#B23A2E;
+    --bad-soft:#F6E1DC;
+    --line: rgba(36,22,15,.18);
+    --shadow: rgba(62,36,20,.22);
+    --void:#17110B;
+    color-scheme: light;
+  }
+  body[data-mode="alltime"]{
+    --cream:#0D0A05;
+    --cream-soft:#181307;
+    --paper:#221a0c;
+    --ink:#F4EACB;
+    --brown:#BE9A4E;
+    --orange:#D4AF37;
+    --orange-light:#F2D888;
+    --black:#D4AF37;
+    --line: rgba(212,175,55,.28);
+    --shadow: rgba(212,175,55,.22);
+    --void:#0A0703;
+    --good:#6FCB6B;
+    --good-soft: rgba(111,203,107,.18);
+    --bad:#FF6F63;
+    --bad-soft: rgba(255,111,99,.18);
+    color-scheme: dark;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--cream);
+    color:var(--ink);
+    font-family:'Karla', system-ui, sans-serif;
+    padding-inline:16px;
+    min-height:100%;
+    transition:background .3s ease, color .3s ease;
+  }
+  h1,h2,h3,.display{
+    font-family:'Fraunces', Georgia, serif;
+    font-optical-sizing:auto;
+    text-wrap:balance;
+    margin:0;
+  }
+  .impact{
+    font-family:'Anton', 'Fraunces', sans-serif;
+    text-transform:uppercase;
+  }
+  .tabular{ font-variant-numeric: tabular-nums; }
+  .wrap{
+    max-width:540px;
+    margin:0 auto;
+    padding-block:22px 44px;
+  }
+  body.playing .wrap{ padding-block:12px 16px; }
+  a{ color:var(--orange); }
+
+  /* ---------- top bar ---------- */
+  body.playing .topbar{ display:none; }
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+    row-gap:8px;
+    margin-bottom:20px;
+    padding-bottom:14px;
+    border-bottom:2px solid var(--black);
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .brand .logo{
+    height:60px; width:auto;
+    flex:none;
+    display:block;
+  }
+  .brand h1{ font-size:32px; line-height:1; color:var(--black); font-weight:700; }
+  .brand h1 span{ color:var(--orange); }
+
+  /* ---------- mode switch ---------- */
+  .mode-switch{
+    position:relative;
+    display:flex;
+    width:168px;
+    height:38px;
+    background:var(--cream);
+    border:2px solid var(--black);
+    border-radius:999px;
+    cursor:pointer;
+    overflow:hidden;
+    flex:none;
+    user-select:none;
+  }
+  .mode-switch .knob{
+    position:absolute;
+    top:2px; left:2px;
+    width:calc(50% - 2px);
+    height:calc(100% - 4px);
+    background:var(--orange);
+    border-radius:999px;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);
+    z-index:0;
+  }
+  .mode-switch.on .knob{ transform:translateX(100%); }
+  .mode-switch .side{
+    position:relative;
+    z-index:1;
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:'Karla', sans-serif;
+    font-weight:700;
+    font-size:10.5px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    color:var(--brown);
+    transition:color .28s ease;
+    pointer-events:none;
+  }
+  .mode-switch .side.active{ color:var(--paper); }
+  @media (max-width:360px){ .mode-switch{ width:100%; } }
+
+  /* ---------- hub ---------- */
+  .eyebrow{
+    font-size:11px;
+    letter-spacing:.14em;
+    color:var(--orange);
+    text-transform:uppercase;
+    font-weight:700;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+    margin-top:18px;
+  }
+  @media (max-width:420px){ .grid{ grid-template-columns:1fr; } }
+  .tile{
+    background:var(--paper);
+    border:2px solid var(--black);
+    border-radius:14px;
+    padding:16px;
+    text-align:left;
+    cursor:pointer;
+    color:var(--ink);
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-height:118px;
+    box-shadow: 3px 3px 0 var(--shadow);
+    transition:transform .12s ease, box-shadow .12s ease;
+    font-family:inherit;
+  }
+  .tile:hover{ transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--shadow); }
+  .tile:active{ transform:translate(0,0); box-shadow:2px 2px 0 var(--shadow); }
+  .tile .num{
+    font-family:'Anton', sans-serif;
+    font-size:12px;
+    color:var(--orange);
+    letter-spacing:.08em;
+  }
+  .tile .name{
+    font-family:'Fraunces', serif;
+    font-weight:700;
+    font-size:18px;
+    line-height:1.15;
+  }
+  .tile .desc{
+    font-size:12.5px;
+    color:var(--brown);
+    line-height:1.4;
+    flex:1;
+  }
+  .tile.locked{
+    cursor:default;
+    opacity:.6;
+    box-shadow:none;
+    border-color:var(--line);
+  }
+  .tile.locked:hover{ transform:none; box-shadow:none; }
+  .soon{
+    align-self:flex-start;
+    font-size:10px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    background:var(--cream);
+    color:var(--brown);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:3px 8px;
+    margin-top:2px;
+  }
+
+  /* ---------- game screen ---------- */
+  .screen{ display:none; }
+  .screen.active{ display:block; }
+  .gamebar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:8px;
+  }
+  .backbtn{
+    background:var(--paper);
+    border:2px solid var(--black);
+    color:var(--ink);
+    font-family:'Karla', sans-serif;
+    font-weight:600;
+    font-size:13px;
+    padding:7px 13px;
+    border-radius:999px;
+    cursor:pointer;
+  }
+  .backbtn:hover{ background:var(--cream-soft); }
+  .streakbox{ display:flex; gap:16px; align-items:center; }
+  .streakbox .item{ text-align:right; }
+  .streakbox .label{
+    font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--brown); font-weight:600;
+  }
+  .streakbox .val{
+    font-family:'Anton', sans-serif; font-size:24px; color:var(--orange);
+  }
+
+  .category-banner{
+    text-align:center;
+    background:var(--void);
+    border:2px solid var(--black);
+    border-radius:14px;
+    padding:10px 14px;
+    margin-bottom:8px;
+    box-shadow: 3px 3px 0 var(--shadow);
+  }
+  .category-banner .cat{
+    font-family:'Anton', sans-serif;
+    font-size:34px;
+    font-weight:400;
+    letter-spacing:.02em;
+    color:var(--orange-light);
+    line-height:1.05;
+    text-wrap:balance;
+  }
+  @media (max-width:380px){ .category-banner .cat{ font-size:28px; } }
+  .category-banner .hint{
+    font-size:11.5px;
+    color:var(--cream-soft);
+    opacity:.75;
+    margin-top:5px;
+  }
+
+  .matchup{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+  .vspill{
+    position:relative;
+    text-align:center;
+    margin:-6px 0 10px;
+    z-index:2;
+  }
+  .vspill span{
+    display:inline-block;
+    background:var(--orange);
+    color:var(--paper);
+    font-family:'Anton', sans-serif;
+    font-size:12px;
+    letter-spacing:.08em;
+    padding:5px 12px;
+    border-radius:999px;
+    box-shadow:2px 2px 0 var(--shadow);
+  }
+
+  .option{
+    background:var(--paper);
+    border:2px solid var(--black);
+    border-radius:16px;
+    padding:10px 10px 10px;
+    cursor:pointer;
+    text-align:center;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    font-family:inherit;
+    box-shadow:3px 3px 0 var(--shadow);
+    transition:transform .12s ease, box-shadow .12s ease, background .15s ease, border-color .15s ease;
+    position:relative;
+    overflow:hidden;
+  }
+  .option:hover:not(.locked){ transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--shadow); }
+  .option:active:not(.locked){ transform:translate(0,0); }
+  .option.locked{ cursor:default; }
+
+  .avatar{
+    width:82%;
+    aspect-ratio:2/3;
+    border-radius:12px;
+    border:2px solid var(--black);
+    overflow:hidden;
+    background:linear-gradient(160deg, var(--orange-light), var(--orange));
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex:none;
+  }
+  .avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .avatar .initials{
+    font-family:'Anton', sans-serif;
+    font-size:15vw;
+    color:var(--paper);
+    text-shadow:1px 1px 0 rgba(0,0,0,.15);
+  }
+  @media (min-width:420px){ .avatar .initials{ font-size:52px; } }
+
+  .opt-era{
+    font-size:10px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--brown);
+  }
+  .opt-name{
+    font-family:'Fraunces', serif;
+    font-weight:700;
+    font-size:16.5px;
+    line-height:1.15;
+    min-height:2.3em;
+    display:flex;
+    align-items:center;
+  }
+
+  .barwrap{
+    width:100%;
+    height:0px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-end;
+    overflow:hidden;
+    transition:height .25s ease;
+  }
+  .option.revealed .barwrap{ height:60px; margin-top:2px; }
+  .bartrack{
+    width:56%;
+    height:100%;
+    background:var(--cream);
+    border:2px solid var(--black);
+    border-radius:8px 8px 3px 3px;
+    display:flex;
+    flex-direction:column;
+    justify-content:flex-end;
+    overflow:hidden;
+  }
+  .barfill{
+    width:100%;
+    height:0%;
+    background:linear-gradient(180deg, var(--orange-light), var(--orange));
+    transition:height .8s cubic-bezier(.2,.8,.2,1);
+  }
+  .option.correct .barfill{ background:linear-gradient(180deg, #86b876, var(--good)); }
+  .option.wrong .barfill{ background:linear-gradient(180deg, #e08d84, var(--bad)); }
+
+  .opt-value{
+    font-family:'Anton', sans-serif;
+    font-size:22px;
+    color:var(--ink);
+    min-height:1.2em;
+  }
+  .opt-tag{
+    font-size:10px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    font-weight:700;
+    padding:2px 9px;
+    border-radius:999px;
+    min-height:1.4em;
+    visibility:hidden;
+  }
+  .option.correct .opt-tag{ visibility:visible; background:var(--good-soft); color:var(--good); }
+  .option.wrong .opt-tag{ visibility:visible; background:var(--bad-soft); color:var(--bad); }
+  .option.correct{ border-color:var(--good); }
+  .option.wrong{ border-color:var(--bad); opacity:.85; }
+
+  .next-row{ margin-top:8px; display:flex; justify-content:center; }
+  .primary-btn{
+    font-family:'Anton', sans-serif;
+    font-size:15px;
+    letter-spacing:.04em;
+    background:var(--orange);
+    color:var(--paper);
+    border:2px solid var(--black);
+    border-radius:999px;
+    padding:10px 28px;
+    cursor:pointer;
+    box-shadow:3px 3px 0 var(--shadow);
+  }
+  .primary-btn:hover{ transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--shadow); }
+  .ghost-btn{
+    font-family:'Karla', sans-serif;
+    font-weight:600;
+    font-size:13.5px;
+    background:var(--paper);
+    border:2px solid var(--black);
+    color:var(--ink);
+    border-radius:999px;
+    padding:12px 22px;
+    cursor:pointer;
+    margin-left:10px;
+  }
+  .ghost-btn:hover{ background:var(--cream-soft); }
+
+  /* ---------- game over ---------- */
+  .gameover{ text-align:center; padding:26px 16px 10px; }
+  .gameover .eyebrow{ color:var(--bad); }
+  .gameover .streaknum{
+    font-family:'Anton', sans-serif;
+    font-size:76px;
+    color:var(--orange);
+    line-height:1;
+    margin:8px 0 2px;
+  }
+  .gameover .streaklabel{
+    font-size:12px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--brown); font-weight:600; margin-bottom:20px;
+  }
+  .gameover .newbest{
+    display:inline-block;
+    font-size:11px; letter-spacing:.08em; text-transform:uppercase; font-weight:700;
+    background:var(--good-soft); color:var(--good);
+    border-radius:999px; padding:4px 10px; margin-bottom:16px;
+  }
+  .actions{ display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
+
+  /* ---------- starting five ---------- */
+  .sf-lineup{ display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+  .sf-slot{
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:var(--paper); border:2px solid var(--black); border-radius:12px;
+    padding:9px 14px; box-shadow:2px 2px 0 var(--shadow);
+    font-family:inherit; text-align:left; cursor:default;
+  }
+  .sf-slot.empty{ opacity:.55; border-style:dashed; box-shadow:none; }
+  .sf-slot.tappable{
+    opacity:1; cursor:pointer; border-style:solid; border-color:var(--orange);
+    color:inherit;
+  }
+  .sf-slot.tappable:hover{ background:var(--cream-soft); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+  .sf-slot.justfilled{ border-color:var(--good); }
+  .sf-slot .sf-pos{
+    font-family:'Anton', sans-serif; font-size:13px; color:var(--orange);
+    width:30px; flex:none; text-align:center;
+  }
+  .sf-slot .sf-slotname{
+    font-family:'Fraunces', serif; font-weight:700; font-size:14px; flex:1;
+    line-height:1.2; color:var(--ink);
+  }
+  .sf-slot .sf-slotname.placeholder{ color:var(--brown); font-weight:500; font-family:'Karla',sans-serif; font-size:13px; }
+  .sf-slot.tappable .sf-slotname.placeholder{ color:var(--orange); font-weight:700; }
+  .sf-slot .sf-slotval{ font-family:'Anton', sans-serif; font-size:16px; color:var(--ink); flex:none; margin-left:auto; }
+  .sf-slot .sf-slot-logo{
+    width:34px; height:34px; flex:none; object-fit:contain;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  }
+  .sf-slot.colored .sf-pos,
+  .sf-slot.colored .sf-slotname,
+  .sf-slot.colored .sf-slotval{ color:inherit; }
+  .sf-badge-fallback{
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:50%; font-family:'Anton', sans-serif; letter-spacing:.02em;
+    border:2px solid rgba(255,255,255,.55); flex:none;
+  }
+  .sf-slot .sf-slot-logo.sf-badge-fallback{ width:34px; height:34px; font-size:11px; }
+  .sf-tap-hint{
+    text-align:center; font-size:12px; color:var(--brown); margin-bottom:10px;
+  }
+
+  .sf-reveal{ position:relative; margin:2px 0 10px; padding-top:12px; cursor:pointer; user-select:none; }
+  .sf-reveal-arrow{
+    position:absolute; top:0; left:50%; transform:translateX(-50%);
+    width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent;
+    border-top:10px solid var(--orange); z-index:2;
+  }
+  .sf-reveal-wrap{
+    position:relative; overflow:hidden;
+    border:2px solid var(--black); border-radius:14px; background:var(--void);
+    padding:10px 0; box-shadow:2px 2px 0 var(--shadow);
+  }
+  .sf-reveal-wrap::before, .sf-reveal-wrap::after{
+    content:""; position:absolute; top:0; bottom:0; width:34px; z-index:1; pointer-events:none;
+  }
+  .sf-reveal-wrap::before{ left:0; background:linear-gradient(90deg, var(--void), rgba(23,17,11,0)); }
+  .sf-reveal-wrap::after{ right:0; background:linear-gradient(270deg, var(--void), rgba(23,17,11,0)); }
+  .sf-reveal-track{ display:flex; align-items:center; }
+  .sf-reveal-item{
+    flex:none; width:70px; height:58px; display:flex; align-items:center; justify-content:center;
+    transition:opacity .25s ease;
+  }
+  .sf-reveal-item img{ width:46px; height:46px; object-fit:contain; filter:drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+  .sf-reveal-item .sf-badge-fallback{ width:46px; height:46px; font-size:13px; }
+  .sf-reveal-item.faded{ opacity:.1; }
+  .sf-reveal-item.landed{ transform:scale(1.55); transition:transform .35s cubic-bezier(.2,.8,.2,1.3); }
+  .sf-reveal-skip{
+    text-align:center; font-size:11px; color:var(--brown); opacity:.8; margin-top:6px;
+  }
+
+  /* Settled state: the spin has finished and only the winning team's logo
+     remains, enlarged, as a persistent indicator for the rest of the round. */
+  .sf-reveal.settled{ cursor:default; }
+  .sf-reveal.settled .sf-reveal-arrow,
+  .sf-reveal.settled .sf-reveal-skip{ display:none; }
+  .sf-reveal.settled .sf-reveal-wrap::before,
+  .sf-reveal.settled .sf-reveal-wrap::after{ display:none; }
+  .sf-reveal.settled .sf-reveal-track{ justify-content:center; }
+  .sf-reveal.settled .sf-reveal-item{
+    width:auto; height:auto; padding:4px 0;
+  }
+  .sf-reveal.settled .sf-reveal-item img,
+  .sf-reveal.settled .sf-reveal-item .sf-badge-fallback{ width:64px; height:64px; font-size:17px; }
+  .sf-reveal.settled .sf-reveal-item.landed{ transform:scale(1); }
+
+  .sf-picker{
+    margin-top:4px; background:var(--void); border:2px solid var(--black); border-radius:14px;
+    padding:14px; box-shadow:3px 3px 0 var(--shadow);
+  }
+  .sf-picker-head{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:10px;
+  }
+  .sf-picker-title{
+    font-family:'Fraunces', serif; font-weight:700; font-size:16px; color:var(--cream-soft);
+  }
+  .sf-search{
+    width:100%; font-family:'Karla', sans-serif; font-size:14.5px;
+    background:var(--paper); border:2px solid var(--black); border-radius:999px;
+    padding:10px 16px; color:var(--ink); outline:none;
+  }
+  .sf-search::placeholder{ color:var(--brown); opacity:.8; }
+  .sf-results{
+    max-height:240px; overflow-y:auto; display:flex; flex-direction:column;
+    gap:6px; margin-top:8px;
+  }
+  .sf-result-row{
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:var(--paper); border:2px solid var(--black); border-radius:12px;
+    padding:9px 14px; cursor:pointer; font-family:inherit; text-align:left;
+  }
+  .sf-result-row:hover{ background:var(--cream-soft); }
+  .sf-result-row .sf-rname{
+    font-family:'Fraunces', serif; font-weight:700; font-size:13.5px; flex:1; color:var(--ink);
+  }
+  .sf-result-row .sf-rteams{
+    font-size:10px; color:var(--brown); flex:none; text-align:right; max-width:120px; line-height:1.2;
+  }
+  .sf-noresults{
+    margin-top:10px; font-size:13px; color:var(--brown); text-align:center;
+    background:var(--cream-soft); border:2px dashed var(--line); border-radius:12px; padding:14px;
+  }
+
+  .sf-results-wrap{ text-align:center; padding-top:6px; }
+  .sf-accuracy-num{
+    font-family:'Anton', sans-serif; font-size:60px; color:var(--orange); line-height:1; margin:6px 0 0;
+  }
+  .sf-rating{
+    font-family:'Fraunces', serif; font-weight:700; font-size:16px; letter-spacing:.03em;
+    text-transform:uppercase; color:var(--ink); margin-bottom:14px;
+  }
+  .sf-scoreline{ display:flex; justify-content:center; gap:28px; margin-bottom:18px; }
+  .sf-scoreline .item{ text-align:center; }
+  .sf-scoreline .label{
+    font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--brown); font-weight:600;
+  }
+  .sf-scoreline .val{ font-family:'Anton', sans-serif; font-size:26px; color:var(--ink); }
+  .sf-section-title{ text-align:left; margin:14px 2px 6px; }
+  .sf-result-list{ display:flex; flex-direction:column; gap:6px; }
+
+  @media (prefers-reduced-motion: reduce){
+    .barfill,.option,.tile,.barwrap{ transition:none !important; }
+  }
+  [hidden]{ display:none !important; }
+</style>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <img class="logo" src="trophy-logo.png" alt="">
+      <h1>Hoop <span>Head</span></h1>
+    </div>
+    <div class="mode-switch" id="mode-switch" role="switch" aria-checked="false" tabindex="0" aria-label="Switch between Current and All-Time mode">
+      <span class="knob"></span>
+      <span class="side side-current active">Current</span>
+      <span class="side side-alltime">All-Time</span>
+    </div>
+  </div>
+
+  <!-- ================= HUB ================= -->
+  <div class="screen active" id="screen-hub">
+    <div class="grid">
+      <button class="tile" data-game="moreless">
+        <div class="num">01</div>
+        <div class="name">Who's Got More?</div>
+        <div class="desc">A stat, two players. Pick the one with more and keep the streak alive.</div>
+      </button>
+
+      <button class="tile" data-game="startingfive">
+        <div class="num">02</div>
+        <div class="name">Starting Five</div>
+        <div class="desc">Five random franchises, one stat. Draft the highest-scoring starting five you can.</div>
+      </button>
+
+      <button class="tile locked" disabled>
+        <div class="num">03</div>
+        <div class="name">Career Path</div>
+        <div class="desc">Just the teams, in order. Name the player.</div>
+        <span class="soon">Coming soon</span>
+      </button>
+
+      <button class="tile locked" disabled>
+        <div class="num">04</div>
+        <div class="name">Teammates?</div>
+        <div class="desc">Two names. Did they ever share a locker room?</div>
+        <span class="soon">Coming soon</span>
+      </button>
+
+      <button class="tile locked" disabled>
+        <div class="num">05</div>
+        <div class="name">NBA Connections</div>
+        <div class="desc">16 players, four hidden groups of four.</div>
+        <span class="soon">Coming soon</span>
+      </button>
+
+      <button class="tile locked" disabled>
+        <div class="num">06</div>
+        <div class="name">Draft Order</div>
+        <div class="desc">Five names, one draft class. Sort the picks.</div>
+        <span class="soon">Coming soon</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= WHO'S GOT MORE ================= -->
+  <div class="screen" id="screen-ml">
+    <div class="gamebar">
+      <button class="backbtn" id="ml-back">&larr; Hub</button>
+      <div class="streakbox">
+        <div class="item">
+          <div class="label">Streak</div>
+          <div class="val tabular" id="ml-streak">0</div>
+        </div>
+        <div class="item">
+          <div class="label">Best</div>
+          <div class="val tabular" id="ml-best">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="category-banner">
+      <div class="cat impact" id="ml-category">CAREER PPG</div>
+      <div class="hint" id="ml-hint">Regular season, career average</div>
+    </div>
+
+    <div class="matchup" id="ml-matchup">
+      <button class="option" id="ml-opt-0">
+        <div class="avatar" id="ml-avatar-0"><span class="initials"></span></div>
+        <div class="opt-era" id="ml-era-0"></div>
+        <div class="opt-name" id="ml-name-0"></div>
+        <div class="opt-tag" id="ml-tag-0">MORE</div>
+        <div class="opt-value tabular" id="ml-value-0"></div>
+        <div class="barwrap"><div class="bartrack"><div class="barfill" id="ml-fill-0"></div></div></div>
+      </button>
+      <button class="option" id="ml-opt-1">
+        <div class="avatar" id="ml-avatar-1"><span class="initials"></span></div>
+        <div class="opt-era" id="ml-era-1"></div>
+        <div class="opt-name" id="ml-name-1"></div>
+        <div class="opt-tag" id="ml-tag-1">MORE</div>
+        <div class="opt-value tabular" id="ml-value-1"></div>
+        <div class="barwrap"><div class="bartrack"><div class="barfill" id="ml-fill-1"></div></div></div>
+      </button>
+    </div>
+
+    <div class="next-row" id="ml-next" hidden>
+      <button class="primary-btn" id="ml-continue">Next Matchup</button>
+    </div>
+  </div>
+
+  <!-- ================= GAME OVER ================= -->
+  <div class="screen" id="screen-over">
+    <div class="gameover">
+      <div class="eyebrow">Streak snapped</div>
+      <div class="streaknum tabular" id="over-streak">0</div>
+      <div class="streaklabel">final streak</div>
+      <div id="over-newbest" hidden><span class="newbest">New best streak</span></div>
+      <div class="actions">
+        <button class="primary-btn" id="over-again">Play Again</button>
+        <button class="ghost-btn" id="over-hub">Back to Hub</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= STARTING FIVE: PLAY ================= -->
+  <div class="screen" id="screen-sf-play">
+    <div class="gamebar">
+      <button class="backbtn" id="sf-back">&larr; Hub</button>
+      <div class="streakbox">
+        <div class="item">
+          <div class="label">Round</div>
+          <div class="val tabular" id="sf-round">1/5</div>
+        </div>
+        <div class="item">
+          <div class="label">Total</div>
+          <div class="val tabular" id="sf-total">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="category-banner">
+      <div class="cat impact" id="sf-franchise">FRANCHISE</div>
+      <div class="hint" id="sf-hint">Pick one player who suited up for them</div>
+    </div>
+
+    <div class="sf-lineup" id="sf-lineup"></div>
+
+    <div class="sf-reveal" id="sf-reveal" hidden>
+      <div class="sf-reveal-arrow"></div>
+      <div class="sf-reveal-wrap" id="sf-reveal-wrap">
+        <div class="sf-reveal-track" id="sf-reveal-track"></div>
+      </div>
+      <div class="sf-reveal-skip">Tap to skip</div>
+    </div>
+
+    <div class="sf-tap-hint" id="sf-tap-hint">Tap an open slot above to fill it</div>
+
+    <div class="sf-picker" id="sf-picker" hidden>
+      <div class="sf-picker-head">
+        <div class="sf-picker-title" id="sf-picker-title">Pick a PG</div>
+        <button class="ghost-btn" id="sf-picker-cancel">Cancel</button>
+      </div>
+      <input class="sf-search" id="sf-search" type="text" placeholder="Search players by name..." autocomplete="off">
+      <div class="sf-results" id="sf-results"></div>
+      <div class="sf-noresults" id="sf-noresults" hidden></div>
+    </div>
+
+    <div class="sf-noresults" id="sf-deadend" hidden></div>
+
+    <div class="next-row" id="sf-next" hidden>
+      <button class="primary-btn" id="sf-continue">Next Franchise</button>
+    </div>
+  </div>
+
+  <!-- ================= STARTING FIVE: RESULTS ================= -->
+  <div class="screen" id="screen-sf-results">
+    <div class="sf-results-wrap">
+      <div class="eyebrow" id="sf-result-eyebrow">Starting Five &middot; Career High Points</div>
+      <div class="sf-accuracy-num tabular" id="sf-accuracy">0%</div>
+      <div class="sf-rating" id="sf-rating">Keep Grinding</div>
+      <div id="sf-perfect-badge" hidden><span class="newbest">Perfect Lineup &#128081;</span></div>
+
+      <div class="sf-scoreline">
+        <div class="item">
+          <div class="label">Your Score</div>
+          <div class="val tabular" id="sf-your-score">0</div>
+        </div>
+        <div class="item">
+          <div class="label">Perfect Score</div>
+          <div class="val tabular" id="sf-perfect-score">0</div>
+        </div>
+      </div>
+
+      <div class="eyebrow sf-section-title">Your Lineup</div>
+      <div class="sf-result-list" id="sf-your-lineup"></div>
+
+      <div class="eyebrow sf-section-title">Optimal Lineup</div>
+      <div class="sf-result-list" id="sf-optimal-lineup"></div>
+
+      <div class="actions" style="margin-top:18px;">
+        <button class="primary-btn" id="sf-again">Play Again</button>
+        <button class="ghost-btn" id="sf-hub">Back to Hub</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------------------------------------------------------
+  // Data: 100-player all-time pool, sourced from the requester's
+  // NBA_All_Time_100_Career_Stats workbook (Basketball-Reference
+  // career regular-season totals/averages, retrieved Sept 24 2026).
+  // Per-game and shooting fields are career averages; pts is career
+  // total points. Steals, blocks, turnovers, BPM, and 3P% are blank
+  // for a handful of pre-1973-74 / pre-1979-80 players whose stats
+  // were never tracked (Russell, Chamberlain, Baylor, Pettit, Cousy,
+  // Robertson, West, Havlicek, Reed) -- the matchup logic already
+  // skips any category a player doesn't have data for, so this never
+  // produces an unfair comparison. h (height), dp (draft pick #), and
+  // playoffPpg are carried over from the original curated set for the
+  // players who already had them; new players leave these blank.
+  // photoId matches a key in players-photos.json when a real headshot exists.
+  // ---------------------------------------------------------------
+  var PLAYERS = [
+    {n:"Michael Jordan", era:"1984–03", h:78, dy:1984, dp:3, ppg:30.1, rpg:6.2, apg:5.3, spg:2.3, bpg:0.8, fgpct:0.497, tppct:0.327, ftpct:0.835, bpm:9.2, pts:32292, playoffPpg:33.4, photoId:"jordami01"},
+    {n:"Kareem Abdul-Jabbar", era:"1969–89", h:86, dy:1969, dp:1, ppg:24.6, rpg:11.2, apg:3.6, spg:0.9, bpg:2.6, fgpct:0.559, tppct:0.056, ftpct:0.721, bpm:5.7, pts:38387, playoffPpg:24.3, photoId:"abdulka01"},
+    {n:"Bill Russell", era:"1956–69", h:82, dy:1956, dp:2, ppg:15.1, rpg:22.5, apg:4.3, spg:null, bpg:null, fgpct:0.44, tppct:null, ftpct:0.561, bpm:null, pts:14522, playoffPpg:16.2, photoId:"russebi01"},
+    {n:"Magic Johnson", era:"1979–96", h:81, dy:1979, dp:1, ppg:19.5, rpg:7.2, apg:11.2, spg:1.9, bpg:0.4, fgpct:0.52, tppct:0.303, ftpct:0.848, bpm:7.5, pts:17707, playoffPpg:19.5, photoId:"johnsma02"},
+    {n:"Larry Bird", era:"1979–92", h:81, dy:1978, dp:6, ppg:24.3, rpg:10, apg:6.3, spg:1.7, bpg:0.8, fgpct:0.496, tppct:0.376, ftpct:0.886, bpm:6.9, pts:21791, playoffPpg:23.8, photoId:"birdla01"},
+    {n:"Wilt Chamberlain", era:"1959–73", h:85, dy:1959, ppg:30.1, rpg:22.9, apg:4.4, spg:null, bpg:null, fgpct:0.54, tppct:null, ftpct:0.511, bpm:null, pts:31419, playoffPpg:22.5, photoId:"chambwi01"},
+    {n:"Kobe Bryant", era:"1996–2016", h:78, dy:1996, dp:13, ppg:25, rpg:5.2, apg:4.7, spg:1.4, bpg:0.5, fgpct:0.447, tppct:0.329, ftpct:0.837, bpm:4.6, pts:33643, playoffPpg:25.6, photoId:"bryanko01"},
+    {n:"Tim Duncan", era:"1997–2016", h:83, dy:1997, dp:1, ppg:19, rpg:10.8, apg:3, spg:0.7, bpg:2.2, fgpct:0.506, tppct:0.179, ftpct:0.696, bpm:5.6, pts:26496, playoffPpg:20.6, photoId:"duncati01"},
+    {n:"Shaquille O'Neal", era:"1992–2011", h:85, dy:1992, dp:1, ppg:23.7, rpg:10.9, apg:2.5, spg:0.6, bpg:2.3, fgpct:0.582, tppct:0.045, ftpct:0.527, bpm:5.1, pts:28596, playoffPpg:24.3, photoId:"onealsh01"},
+    {n:"Hakeem Olajuwon", era:"1984–2002", h:84, dy:1984, dp:1, ppg:21.8, rpg:11.1, apg:2.5, spg:1.7, bpg:3.1, fgpct:0.512, tppct:0.202, ftpct:0.712, bpm:4.6, pts:26946, playoffPpg:25.9, photoId:"olajuha01"},
+    {n:"Oscar Robertson", era:"1960–74", h:77, dy:1960, ppg:25.7, rpg:7.5, apg:9.5, spg:1.1, bpg:0.1, fgpct:0.485, tppct:null, ftpct:0.838, bpm:-0.1, pts:26710, playoffPpg:22.2, photoId:"roberos01"},
+    {n:"Jerry West", era:"1960–74", h:75, dy:1960, dp:2, ppg:27, rpg:5.8, apg:6.7, spg:2.6, bpg:0.7, fgpct:0.474, tppct:null, ftpct:0.814, bpm:4.7, pts:25192, playoffPpg:29.1, photoId:"westje01"},
+    {n:"Moses Malone", era:"1976–95", h:82, dy:1974, dp:28, ppg:20.6, rpg:12.2, apg:1.4, spg:0.8, bpg:1.3, fgpct:0.491, tppct:0.1, ftpct:0.769, bpm:1.7, pts:27409, playoffPpg:22.1, photoId:"malonmo01"},
+    {n:"Julius Erving", era:"1976–87 (NBA)", h:79, dy:1972, dp:12, ppg:22, rpg:6.7, apg:3.9, spg:1.8, bpg:1.5, fgpct:0.507, tppct:0.261, ftpct:0.777, bpm:5.2, pts:18364, playoffPpg:24.2, photoId:"ervinju01"},
+    {n:"Kevin Garnett", era:"1995–2016", h:83, dy:1995, dp:5, ppg:17.8, rpg:10, apg:3.7, spg:1.3, bpg:1.4, fgpct:0.497, tppct:0.275, ftpct:0.789, bpm:5.6, pts:26071, playoffPpg:18.2, photoId:"garneke01"},
+    {n:"Dirk Nowitzki", era:"1998–2019", h:84, dy:1998, dp:9, ppg:20.7, rpg:7.5, apg:2.4, spg:0.8, bpg:0.8, fgpct:0.471, tppct:0.38, ftpct:0.879, bpm:4.5, pts:31560, playoffPpg:25.3, photoId:"nowitdi01"},
+    {n:"Karl Malone", era:"1985–2004", h:81, dy:1985, dp:13, ppg:25, rpg:10.1, apg:3.6, spg:1.4, bpg:0.8, fgpct:0.516, tppct:0.274, ftpct:0.742, bpm:5.1, pts:36928, playoffPpg:24.7, photoId:"malonka01"},
+    {n:"Charles Barkley", era:"1984–2000", h:78, dy:1984, dp:5, ppg:22.1, rpg:11.7, apg:3.9, spg:1.5, bpg:0.8, fgpct:0.541, tppct:0.266, ftpct:0.735, bpm:6.1, pts:23757, playoffPpg:23.0, photoId:"barklch01"},
+    {n:"David Robinson", team:"SAS", pos:"C", ppg:21.1, rpg:10.6, apg:2.5, spg:1.4, bpg:3, fgpct:0.518, tppct:0.25, ftpct:0.736, bpm:7.5, pts:20790, photoId:"robinda01"},
+    {n:"Elgin Baylor", team:"MNL/LAL", pos:"F", ppg:27.4, rpg:13.5, apg:4.3, spg:null, bpg:null, fgpct:0.431, tppct:null, ftpct:0.78, bpm:null, pts:23149, photoId:"bayloel01"},
+    {n:"Allen Iverson", era:"1996–2010", h:72, dy:1996, dp:1, ppg:26.7, rpg:3.7, apg:6.2, spg:2.2, bpg:0.2, fgpct:0.425, tppct:0.313, ftpct:0.78, bpm:3.2, pts:24368, playoffPpg:29.7, photoId:"iversal01"},
+    {n:"Dwyane Wade", era:"2003–19", h:76, dy:2003, dp:5, ppg:22, rpg:4.7, apg:5.4, spg:1.5, bpg:0.8, fgpct:0.48, tppct:0.293, ftpct:0.765, bpm:5, pts:23165, playoffPpg:22.3, photoId:"wadedw01"},
+    {n:"Scottie Pippen", era:"1987–2004", h:80, dy:1987, dp:5, ppg:16.1, rpg:6.4, apg:5.2, spg:2, bpg:0.8, fgpct:0.473, tppct:0.326, ftpct:0.704, bpm:4.1, pts:18940, playoffPpg:17.5, photoId:"pippesc01"},
+    {n:"John Stockton", era:"1984–2003", h:73, dy:1984, dp:16, ppg:13.1, rpg:2.7, apg:10.5, spg:2.2, bpg:0.2, fgpct:0.515, tppct:0.384, ftpct:0.826, bpm:6.8, pts:19711, playoffPpg:13.4, photoId:"stockjo01"},
+    {n:"Isiah Thomas", era:"1981–94", h:73, dy:1981, dp:2, ppg:19.2, rpg:3.6, apg:9.3, spg:1.9, bpg:0.3, fgpct:0.452, tppct:0.29, ftpct:0.759, bpm:2.7, pts:18822, playoffPpg:20.4, photoId:"thomais01"},
+    {n:"Steve Nash", era:"1996–2014", h:75, dy:1996, dp:15, ppg:14.3, rpg:3, apg:8.5, spg:0.7, bpg:0.1, fgpct:0.49, tppct:0.428, ftpct:0.904, bpm:3, pts:17387, playoffPpg:17.3, photoId:"nashst01"},
+    {n:"Jason Kidd", team:"DAL/PHO/NJN/NYK", pos:"G", ppg:12.6, rpg:6.3, apg:8.7, spg:1.9, bpg:0.3, fgpct:0.4, tppct:0.349, ftpct:0.785, bpm:3.8, pts:17529, photoId:"kiddja01"},
+    {n:"Clyde Drexler", team:"POR/HOU", pos:"G", ppg:20.4, rpg:6.1, apg:5.6, spg:2, bpg:0.7, fgpct:0.472, tppct:0.318, ftpct:0.788, bpm:5.4, pts:22195, photoId:"drexlcl01"},
+    {n:"Patrick Ewing", era:"1985–2002", h:84, dy:1985, dp:1, ppg:21, rpg:9.8, apg:1.9, spg:1, bpg:2.4, fgpct:0.504, tppct:0.152, ftpct:0.74, bpm:2.9, pts:24815, playoffPpg:20.2, photoId:"ewingpa01"},
+    {n:"George Gervin", team:"SAS/CHI", pos:"G-F", ppg:26.2, rpg:4.6, apg:2.8, spg:1.2, bpg:0.8, fgpct:0.511, tppct:0.297, ftpct:0.844, bpm:2.4, pts:20708, photoId:"gervige01"},
+    {n:"Bob Pettit", team:"MLH/STL", pos:"F-C", ppg:26.4, rpg:16.2, apg:3, spg:null, bpg:null, fgpct:0.436, tppct:null, ftpct:0.761, bpm:null, pts:20880, photoId:"pettibo01"},
+    {n:"Rick Barry", team:"SFW/GSW/HOU", pos:"F", ppg:23.2, rpg:6.5, apg:5.1, spg:2, bpg:0.5, fgpct:0.449, tppct:0.33, ftpct:0.9, bpm:3, pts:18395, photoId:"barryri01"},
+    {n:"John Havlicek", team:"BOS", pos:"F-G", ppg:20.8, rpg:6.3, apg:4.8, spg:1.2, bpg:0.3, fgpct:0.439, tppct:null, ftpct:0.815, bpm:1.2, pts:26395, photoId:"havlijo01"},
+    {n:"Walt Frazier", team:"NYK/CLE", pos:"G", ppg:18.9, rpg:5.9, apg:6.1, spg:1.9, bpg:0.2, fgpct:0.49, tppct:0, ftpct:0.786, bpm:2.5, pts:15581, photoId:"fraziwa01"},
+    {n:"Bob Cousy", team:"BOS/CIN", pos:"G", ppg:18.4, rpg:5.2, apg:7.5, spg:null, bpg:null, fgpct:0.375, tppct:null, ftpct:0.803, bpm:null, pts:16960, photoId:"cousybo01"},
+    {n:"Willis Reed", team:"NYK", pos:"C-F", ppg:18.7, rpg:12.9, apg:1.8, spg:0.6, bpg:1.1, fgpct:0.476, tppct:null, ftpct:0.747, bpm:1.3, pts:12183, photoId:"reedwi01"},
+    {n:"Elvin Hayes", team:"SDR/HOU/BAL/CAP/WSB", pos:"F-C", ppg:21, rpg:12.5, apg:1.8, spg:1, bpg:2, fgpct:0.452, tppct:0.147, ftpct:0.67, bpm:0.6, pts:27313, photoId:"hayesel01"},
+    {n:"Dominique Wilkins", team:"ATL/LAC/BOS/SAS/ORL", pos:"F-G", ppg:24.8, rpg:6.7, apg:2.5, spg:1.3, bpg:0.6, fgpct:0.461, tppct:0.319, ftpct:0.811, bpm:3.3, pts:26668, photoId:"wilkido01"},
+    {n:"Reggie Miller", era:"1987–2005", h:79, dy:1987, dp:11, ppg:18.2, rpg:3, apg:3, spg:1.1, bpg:0.2, fgpct:0.471, tppct:0.395, ftpct:0.888, bpm:3.5, pts:25279, playoffPpg:20.6, photoId:"millere01"},
+    {n:"Ray Allen", era:"1996–2014", h:77, dy:1996, dp:5, ppg:18.9, rpg:4.1, apg:3.4, spg:1.1, bpg:0.2, fgpct:0.452, tppct:0.4, ftpct:0.894, bpm:2.9, pts:24505, playoffPpg:16.1, photoId:"allenra02"},
+    {n:"Paul Pierce", team:"BOS/BRK/WAS/LAC", pos:"F-G", ppg:19.7, rpg:5.6, apg:3.5, spg:1.3, bpg:0.6, fgpct:0.445, tppct:0.368, ftpct:0.806, bpm:3.7, pts:26397, photoId:"piercpa01"},
+    {n:"Dennis Rodman", team:"DET/SAS/CHI/LAL/DAL", pos:"F", ppg:7.3, rpg:13.1, apg:1.8, spg:0.7, bpg:0.6, fgpct:0.521, tppct:0.231, ftpct:0.584, bpm:0.9, pts:6683, photoId:"rodmade01"},
+    {n:"Carmelo Anthony", era:"2003–22", h:79, dy:2003, dp:3, ppg:22.5, rpg:6.2, apg:2.7, spg:1, bpg:0.5, fgpct:0.447, tppct:0.355, ftpct:0.814, bpm:1.3, pts:28289, playoffPpg:23.1, photoId:"anthoca01"},
+    {n:"Vince Carter", team:"TOR/NJN/ORL/PHO/DAL/MEM/SAC/ATL", pos:"G-F", ppg:16.7, rpg:4.3, apg:3.1, spg:1, bpg:0.6, fgpct:0.435, tppct:0.371, ftpct:0.798, bpm:3, pts:25728, photoId:"cartevi01"},
+    {n:"Tracy McGrady", team:"TOR/ORL/HOU/NYK/DET/ATL", pos:"G-F", ppg:19.6, rpg:5.6, apg:4.4, spg:1.2, bpg:0.9, fgpct:0.435, tppct:0.338, ftpct:0.746, bpm:5.2, pts:18381, photoId:"mcgratr01"},
+    {n:"Dwight Howard", era:"2004–22", h:82, dy:2004, dp:1, ppg:15.7, rpg:11.8, apg:1.3, spg:0.9, bpg:1.8, fgpct:0.587, tppct:0.214, ftpct:0.567, bpm:1.9, pts:19485, playoffPpg:15.3, photoId:"howardw01"},
+    {n:"Chris Webber", team:"GSW/WSB/WAS/SAC/PHI/DET", pos:"F-C", ppg:20.7, rpg:9.8, apg:4.2, spg:1.4, bpg:1.4, fgpct:0.479, tppct:0.299, ftpct:0.649, bpm:3.4, pts:17182, photoId:"webbech01"},
+    {n:"Gary Payton", team:"SEA/MIL/LAL/BOS/MIA", pos:"G", ppg:16.3, rpg:3.9, apg:6.7, spg:1.8, bpg:0.2, fgpct:0.466, tppct:0.317, ftpct:0.729, bpm:3.3, pts:21813, photoId:"paytoga01"},
+    {n:"Adrian Dantley", team:"BUF/IND/LAL/UTA/DET/DAL/MIL", pos:"F-G", ppg:24.3, rpg:5.7, apg:3, spg:1, bpg:0.2, fgpct:0.54, tppct:0.171, ftpct:0.818, bpm:3.1, pts:23177, photoId:"dantlad01"},
+    {n:"Alex English", team:"MIL/IND/DEN/DAL", pos:"F", ppg:21.5, rpg:5.5, apg:3.6, spg:0.9, bpg:0.7, fgpct:0.507, tppct:0.217, ftpct:0.832, bpm:2, pts:25613, photoId:"englial01"},
+    {n:"Chris Bosh", era:"2003–17", h:83, dy:2003, dp:4, ppg:19.2, rpg:8.5, apg:2, spg:0.8, bpg:1, fgpct:0.494, tppct:0.335, ftpct:0.799, bpm:1.9, pts:17189, playoffPpg:15.6, photoId:"boshch01"},
+    {n:"Chauncey Billups", team:"TOR/BOS/DEN/MIN/DET/NYK/LAC", pos:"G", ppg:15.2, rpg:2.9, apg:5.4, spg:1, bpg:0.2, fgpct:0.415, tppct:0.387, ftpct:0.894, bpm:3.2, pts:15802, photoId:"billuch01"},
+    {n:"Ben Wallace", team:"WSB/WAS/ORL/DET/CHI/CLE", pos:"F-C", ppg:5.7, rpg:9.6, apg:1.3, spg:1.3, bpg:2, fgpct:0.474, tppct:0.137, ftpct:0.414, bpm:2.4, pts:6254, photoId:"wallabe01"},
+    {n:"Pau Gasol", team:"MEM/LAL/CHI/SAS/MIL", pos:"C-F", ppg:17, rpg:9.2, apg:3.2, spg:0.5, bpg:1.6, fgpct:0.507, tppct:0.368, ftpct:0.753, bpm:3.6, pts:20894, photoId:"gasolpa01"},
+    {n:"Marc Gasol", team:"MEM/TOR/LAL", pos:"C", ppg:14, rpg:7.4, apg:3.4, spg:0.9, bpg:1.4, fgpct:0.481, tppct:0.36, ftpct:0.776, bpm:3, pts:12514, photoId:"gasolma01"},
+    {n:"Tony Parker", team:"SAS/CHO", pos:"G", ppg:15.5, rpg:2.7, apg:5.6, spg:0.8, bpg:0.1, fgpct:0.491, tppct:0.324, ftpct:0.751, bpm:1.1, pts:19473, photoId:"parketo01"},
+    {n:"Manu Ginóbili", team:"SAS", pos:"G", ppg:13.3, rpg:3.5, apg:3.8, spg:1.3, bpg:0.3, fgpct:0.447, tppct:0.369, ftpct:0.827, bpm:5, pts:14043, photoId:"ginobma01"},
+    {n:"Shawn Kemp", team:"SEA/CLE/POR/ORL", pos:"F-C", ppg:14.6, rpg:8.4, apg:1.6, spg:1.1, bpg:1.2, fgpct:0.488, tppct:0.277, ftpct:0.741, bpm:0.6, pts:15347, photoId:"kempsh01"},
+    {n:"Amar'e Stoudemire", team:"PHO/NYK/DAL/MIA", pos:"F-C", ppg:18.9, rpg:7.8, apg:1.2, spg:0.8, bpg:1.2, fgpct:0.537, tppct:0.236, ftpct:0.761, bpm:1.3, pts:15994, photoId:"stoudam01"},
+    {n:"Rasheed Wallace", team:"WSB/POR/DET/ATL/BOS/NYK", pos:"F-C", ppg:14.4, rpg:6.7, apg:1.8, spg:1, bpg:1.3, fgpct:0.467, tppct:0.336, ftpct:0.721, bpm:2.2, pts:16006, photoId:"wallara01"},
+    {n:"Jermaine O'Neal", team:"POR/IND/MIA/TOR/BOS/PHO/GSW", pos:"C-F", ppg:13.2, rpg:7.2, apg:1.4, spg:0.5, bpg:1.8, fgpct:0.467, tppct:0.147, ftpct:0.715, bpm:0.3, pts:13309, photoId:"onealje01"},
+    {n:"Yao Ming", team:"HOU", pos:"C", ppg:19, rpg:9.2, apg:1.6, spg:0.4, bpg:1.9, fgpct:0.524, tppct:0.2, ftpct:0.833, bpm:3.2, pts:9247, photoId:"mingya01"},
+    {n:"Dikembe Mutombo", team:"DEN/ATL/PHI/NJN/NYK/HOU", pos:"C", ppg:9.8, rpg:10.3, apg:1, spg:0.4, bpg:2.8, fgpct:0.518, tppct:0, ftpct:0.684, bpm:1.7, pts:11729, photoId:"mutomdi01"},
+    {n:"Alonzo Mourning", team:"CHH/MIA/NJN", pos:"C-F", ppg:17.1, rpg:8.5, apg:1.1, spg:0.5, bpg:2.8, fgpct:0.527, tppct:0.247, ftpct:0.692, bpm:2.2, pts:14311, photoId:"mournal01"},
+    {n:"Grant Hill", team:"DET/ORL/PHO/LAC", pos:"F-G", ppg:16.7, rpg:6, apg:4.1, spg:1.2, bpg:0.6, fgpct:0.483, tppct:0.314, ftpct:0.769, bpm:3, pts:17137, photoId:"hillgr01"},
+    {n:"Penny Hardaway", team:"ORL/PHO/NYK/MIA", pos:"G-F", ppg:15.2, rpg:4.5, apg:5, spg:1.6, bpg:0.4, fgpct:0.458, tppct:0.316, ftpct:0.774, bpm:2.5, pts:10684},
+    {n:"Tim Hardaway", team:"GSW/MIA/DAL/DEN/IND", pos:"G", ppg:17.7, rpg:3.3, apg:8.2, spg:1.6, bpg:0.1, fgpct:0.431, tppct:0.355, ftpct:0.782, bpm:3.1, pts:15373, photoId:"hardati01"},
+    {n:"Mark Price", team:"CLE/WSB/GSW/ORL", pos:"G", ppg:15.2, rpg:2.6, apg:6.7, spg:1.2, bpg:0.1, fgpct:0.472, tppct:0.402, ftpct:0.904, bpm:3.7, pts:10989, photoId:"pricema01"},
+    {n:"Kevin McHale", team:"BOS", pos:"F-C", ppg:17.9, rpg:7.3, apg:1.7, spg:0.4, bpg:1.7, fgpct:0.554, tppct:0.261, ftpct:0.798, bpm:2.5, pts:17335, photoId:"mchalke01"},
+    {n:"Shawn Marion", team:"PHO/MIA/TOR/DAL/CLE", pos:"F", ppg:15.2, rpg:8.7, apg:1.9, spg:1.5, bpg:1.1, fgpct:0.484, tppct:0.331, ftpct:0.81, bpm:2.7, pts:17700, photoId:"mariosh01"},
+    {n:"Sidney Moncrief", team:"MIL/ATL", pos:"G", ppg:15.6, rpg:4.7, apg:3.6, spg:1.2, bpg:0.3, fgpct:0.502, tppct:0.284, ftpct:0.831, bpm:3.7, pts:11931, photoId:"moncrsi01"},
+    {n:"Deron Williams", team:"UTA/NJN/BRK/DAL/CLE", pos:"G", ppg:16.3, rpg:3.1, apg:8.1, spg:1, bpg:0.2, fgpct:0.445, tppct:0.357, ftpct:0.822, bpm:1.9, pts:13804, photoId:"willide01"},
+    {n:"Gilbert Arenas", team:"GSW/WAS/ORL/MEM", pos:"G", ppg:20.7, rpg:3.9, apg:5.3, spg:1.6, bpg:0.2, fgpct:0.421, tppct:0.351, ftpct:0.803, bpm:2.6, pts:11402, photoId:"arenagi01"},
+    {n:"Baron Davis", team:"CHH/NOH/GSW/LAC/CLE/NYK", pos:"G", ppg:16.1, rpg:3.8, apg:7.2, spg:1.8, bpg:0.4, fgpct:0.409, tppct:0.32, ftpct:0.711, bpm:2.6, pts:13447, photoId:"davisba01"},
+    {n:"Rajon Rondo", team:"BOS/DAL/SAC/CHI/NOP/LAL/LAC/ATL/CLE", pos:"G", ppg:9.8, rpg:4.5, apg:7.9, spg:1.6, bpg:0.1, fgpct:0.456, tppct:0.324, ftpct:0.611, bpm:1.2, pts:9337, photoId:"rondora01"},
+    {n:"Andre Iguodala", team:"PHI/DEN/GSW/MIA", pos:"F-G", ppg:11.3, rpg:4.9, apg:4.2, spg:1.4, bpg:0.5, fgpct:0.463, tppct:0.33, ftpct:0.709, bpm:2.1, pts:13968, photoId:"iguodan01"},
+    {n:"Zach Randolph", team:"POR/NYK/LAC/MEM/SAC", pos:"F-C", ppg:16.6, rpg:9.1, apg:1.8, spg:0.7, bpg:0.3, fgpct:0.471, tppct:0.273, ftpct:0.764, bpm:0.2, pts:18578, photoId:"randoza01"},
+    {n:"Blake Griffin", team:"LAC/DET/BRK/BOS", pos:"F-C", ppg:19, rpg:8, apg:4, spg:0.8, bpg:0.5, fgpct:0.493, tppct:0.328, ftpct:0.696, bpm:3.3, pts:14513, photoId:"griffbl01"},
+    {n:"DeAndre Jordan", team:"LAC/NYK/DAL/BRK/PHI/LAL/DEN/NOP", pos:"C", ppg:8.5, rpg:9.7, apg:0.9, spg:0.5, bpg:1.4, fgpct:0.674, tppct:0.154, ftpct:0.475, bpm:1.1, pts:9492, photoId:"jordade01"},
+    {n:"LaMarcus Aldridge", team:"POR/SAS/BRK", pos:"F-C", ppg:19.1, rpg:8.1, apg:1.9, spg:0.7, bpg:1.1, fgpct:0.493, tppct:0.32, ftpct:0.813, bpm:1.7, pts:20558, photoId:"aldrila01"},
+    {n:"Paul Millsap", team:"UTA/ATL/DEN/PHI/BRK", pos:"F", ppg:13.4, rpg:7.1, apg:2.2, spg:1.2, bpg:1, fgpct:0.489, tppct:0.341, ftpct:0.736, bpm:1.9, pts:14536, photoId:"millspa01"},
+    {n:"Kemba Walker", team:"CHA/CHO/BOS/NYK/DAL", pos:"G", ppg:19.3, rpg:3.8, apg:5.3, spg:1.2, bpg:0.4, fgpct:0.418, tppct:0.36, ftpct:0.84, bpm:2.8, pts:14486, photoId:"walkeke02"},
+    {n:"Isaiah Thomas", team:"SAC/PHO/BOS/CLE/LAL/DEN/WAS/NOP/DAL/CHO", pos:"G", ppg:17.5, rpg:2.4, apg:4.8, spg:0.8, bpg:0.1, fgpct:0.434, tppct:0.363, ftpct:0.872, bpm:2.1, pts:9723},
+    {n:"Joakim Noah", team:"CHI/NYK/MEM/LAC", pos:"C", ppg:8.8, rpg:9, apg:2.8, spg:0.8, bpg:1.3, fgpct:0.491, tppct:0, ftpct:0.7, bpm:2.5, pts:5881, photoId:"noahjo01"},
+    {n:"Luol Deng", team:"CHI/CLE/MIA/LAL/MIN", pos:"F", ppg:14.8, rpg:6.1, apg:2.3, spg:1, bpg:0.5, fgpct:0.456, tppct:0.332, ftpct:0.769, bpm:0.9, pts:13361, photoId:"denglu01"},
+    {n:"Tyson Chandler", team:"CHI/NOK/NOH/CHA/DAL/NYK/PHO/LAL/HOU", pos:"C", ppg:8.2, rpg:9, apg:0.8, spg:0.5, bpg:1.2, fgpct:0.597, tppct:0, ftpct:0.644, bpm:0.1, pts:9509, photoId:"chandty01"},
+    {n:"Peja Stojaković", team:"SAC/IND/NOK/NOH/TOR/DAL", pos:"F", ppg:17, rpg:4.7, apg:1.8, spg:0.9, bpg:0.1, fgpct:0.45, tppct:0.401, ftpct:0.895, bpm:1.9, pts:13647, photoId:"stojape01"},
+    {n:"Vlade Divac", team:"LAL/CHH/SAC", pos:"C", ppg:11.8, rpg:8.2, apg:3.1, spg:1.1, bpg:1.4, fgpct:0.495, tppct:0.235, ftpct:0.692, bpm:2.2, pts:13398, photoId:"divacvl01"},
+    {n:"Arvydas Sabonis", team:"POR", pos:"C", ppg:12, rpg:7.3, apg:2.1, spg:0.8, bpg:1.1, fgpct:0.5, tppct:0.328, ftpct:0.786, bpm:4.4, pts:5629, photoId:"sabonar01"},
+    {n:"Detlef Schrempf", team:"DAL/IND/SEA/POR", pos:"F-C", ppg:13.9, rpg:6.2, apg:3.4, spg:0.8, bpg:0.3, fgpct:0.491, tppct:0.384, ftpct:0.803, bpm:1.8, pts:15761, photoId:"schrede01"},
+    {n:"Toni Kukoč", team:"CHI/PHI/ATL/MIL", pos:"F", ppg:11.6, rpg:4.2, apg:3.7, spg:1, bpg:0.3, fgpct:0.447, tppct:0.335, ftpct:0.729, bpm:2.8, pts:9810, photoId:"kukocto01"},
+    {n:"Steve Kerr", team:"PHO/CLE/ORL/CHI/SAS/POR", pos:"G", ppg:6, rpg:1.2, apg:1.8, spg:0.5, bpg:0.1, fgpct:0.479, tppct:0.454, ftpct:0.864, bpm:0.8, pts:5437, photoId:"kerrst01"},
+    {n:"Derek Fisher", team:"LAL/GSW/UTA/OKC/DAL", pos:"G", ppg:8.3, rpg:2.1, apg:3, spg:1.1, bpg:0.1, fgpct:0.399, tppct:0.374, ftpct:0.817, bpm:-0.9, pts:10713, photoId:"fishede01"},
+    {n:"Robert Horry", team:"HOU/LAL/PHO/SAS", pos:"F", ppg:7, rpg:4.8, apg:2.1, spg:1, bpg:0.9, fgpct:0.425, tppct:0.341, ftpct:0.726, bpm:1.8, pts:7715},
+    {n:"Jason Terry", team:"ATL/DAL/BOS/BRK/HOU/MIL", pos:"G", ppg:13.4, rpg:2.3, apg:3.8, spg:1.1, bpg:0.2, fgpct:0.444, tppct:0.38, ftpct:0.845, bpm:1.5, pts:18881, photoId:"terryja01"},
+    {n:"Jamal Crawford", team:"CHI/NYK/GSW/ATL/POR/LAC/MIN/PHO/BRK", pos:"G", ppg:14.6, rpg:2.2, apg:3.4, spg:0.9, bpg:0.2, fgpct:0.41, tppct:0.348, ftpct:0.862, bpm:-0.1, pts:19419, photoId:"crawfja01"},
+    {n:"Lou Williams", team:"PHI/ATL/TOR/LAL/HOU/LAC", pos:"G", ppg:13.9, rpg:2.2, apg:3.4, spg:0.8, bpg:0.2, fgpct:0.419, tppct:0.351, ftpct:0.842, bpm:1.4, pts:15593, photoId:"willilo02"},
+    {n:"Metta World Peace", team:"CHI/IND/SAC/HOU/LAL/NYK", pos:"F", ppg:13.2, rpg:4.5, apg:2.7, spg:1.7, bpg:0.5, fgpct:0.414, tppct:0.339, ftpct:0.715, bpm:1.2, pts:13058, photoId:"artesro01"},
+    {n:"Jason Williams", team:"SAC/MEM/MIA/ORL", pos:"G", ppg:10.5, rpg:2.3, apg:5.9, spg:1.2, bpg:0.1, fgpct:0.398, tppct:0.327, ftpct:0.813, bpm:0.2, pts:8266, photoId:"willija02"},
+    {n:"Muggsy Bogues", team:"WSB/CHH/GSW/TOR", pos:"G", ppg:7.7, rpg:2.6, apg:7.6, spg:1.5, bpg:0, fgpct:0.458, tppct:0.278, ftpct:0.827, bpm:0.8, pts:6858, photoId:"boguemu01"}
+  ];
+
+  var ALLTIME_CATEGORIES = [
+    { key:"ppg", label:"CAREER PPG", hint:"Regular season, career average",
+      unit:"PPG", min:0, max:31, duration:900,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"rpg", label:"CAREER RPG", hint:"Regular season, career average",
+      unit:"RPG", min:0, max:23, duration:1100,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"apg", label:"CAREER APG", hint:"Regular season, career average",
+      unit:"APG", min:0, max:12, duration:1100,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"spg", label:"CAREER SPG", hint:"Steals per game, career average (tracked since 1973–74)",
+      unit:"SPG", min:0, max:3, duration:950,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"bpg", label:"CAREER BPG", hint:"Blocks per game, career average (tracked since 1973–74)",
+      unit:"BPG", min:0, max:3.5, duration:950,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"fgpct", label:"FIELD GOAL %", hint:"Career shooting percentage",
+      unit:"", min:0.35, max:0.70, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"tppct", label:"3-POINT %", hint:"Career shooting percentage (3-pt era, since 1979–80)",
+      unit:"", min:0, max:0.48, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"ftpct", label:"FREE THROW %", hint:"Career shooting percentage",
+      unit:"", min:0.40, max:0.92, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"bpm", label:"BOX PLUS/MINUS", hint:"Career average, per 100 possessions (tracked since 1973–74)",
+      unit:"BPM", min:-2, max:10, duration:1000,
+      fmt:function(v){ return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1); } },
+    { key:"pts", label:"CAREER POINTS", hint:"Total regular-season points scored",
+      unit:"PTS", min:0, max:40000, duration:950,
+      fmt:function(v){ return Math.round(v).toLocaleString(); } },
+    { key:"h", label:"HEIGHT", hint:"Listed playing height",
+      unit:"", min:70, max:90, duration:1200,
+      fmt:function(v){ v = Math.round(v); return Math.floor(v/12) + "'" + (v%12) + '"'; } },
+    { key:"dp", label:"DRAFT PICK #", hint:"Overall pick — higher # means picked later",
+      unit:"OVERALL", min:0, max:60, duration:1250,
+      fmt:function(v){ return "#" + Math.round(v); } },
+    { key:"playoffPpg", label:"PLAYOFF PPG", hint:"Career playoff scoring average",
+      unit:"PPG", min:0, max:35, duration:900,
+      fmt:function(v){ return v.toFixed(1); } }
+  ];
+
+  // ---------------------------------------------------------------
+  // Current-mode pool: exactly the 96 players from this season's
+  // 100-player workbook who have a played 2025–26 row (4 players —
+  // Kyrie Irving, Damian Lillard, Tyrese Haliburton, Fred VanVleet —
+  // sat out the season entirely and are left out so they're never
+  // compared on stats they don't have). Every stat here is single
+  // season, 2025–26 only, so a rookie and a 15-year vet are always
+  // compared on the same current-season basis.
+  // ---------------------------------------------------------------
+  var CURRENT_PLAYERS = [
+    {n:"Nikola Jokic", team:"DEN", pos:"C", ppg:27.7, rpg:12.9, apg:10.7, fgpct:0.569, tppct:0.38, ftpct:0.831, bpm:14.2, tpts:1799, t3pm:112, photoId:"jokicni01"},
+    {n:"Shai Gilgeous-Alexander", team:"OKC", pos:"PG", ppg:31.1, rpg:4.3, apg:6.6, fgpct:0.553, tppct:0.386, ftpct:0.879, bpm:11.7, tpts:2117, t3pm:115, photoId:"gilgesh01"},
+    {n:"Luka Doncic", team:"LAL", pos:"PG", ppg:33.5, rpg:7.7, apg:8.3, fgpct:0.476, tppct:0.366, ftpct:0.78, bpm:9.3, tpts:2143, t3pm:254, photoId:"doncilu01"},
+    {n:"Giannis Antetokounmpo", team:"MIL", pos:"PF", ppg:27.6, rpg:9.8, apg:5.4, fgpct:0.624, tppct:0.333, ftpct:0.65, bpm:9.5, tpts:993, t3pm:15, photoId:"antetgi01"},
+    {n:"Victor Wembanyama", team:"SAS", pos:"C", ppg:25, rpg:11.5, apg:3.1, fgpct:0.512, tppct:0.349, ftpct:0.827, bpm:10.7, tpts:1600, t3pm:122, photoId:"wembavi01"},
+    {n:"Anthony Edwards", team:"MIN", pos:"SG", ppg:28.8, rpg:5, apg:3.7, fgpct:0.489, tppct:0.399, ftpct:0.796, bpm:4.5, tpts:1757, t3pm:205, photoId:"edwaran01"},
+    {n:"Jayson Tatum", team:"BOS", pos:"PF", ppg:21.8, rpg:10, apg:5.3, fgpct:0.411, tppct:0.329, ftpct:0.823, bpm:4.8, tpts:348, t3pm:47, photoId:"tatumja01"},
+    {n:"Stephen Curry", team:"GSW", pos:"PG", ppg:26.6, rpg:3.6, apg:4.7, fgpct:0.468, tppct:0.393, ftpct:0.923, bpm:5.4, tpts:1142, t3pm:190, photoId:"curryst01"},
+    {n:"LeBron James", team:"LAL", pos:"SF", ppg:20.9, rpg:6.1, apg:7.2, fgpct:0.515, tppct:0.317, ftpct:0.737, bpm:3.5, tpts:1256, t3pm:77, photoId:"jamesle01"},
+    {n:"Kevin Durant", team:"HOU", pos:"SF", ppg:26, rpg:5.5, apg:4.8, fgpct:0.52, tppct:0.413, ftpct:0.874, bpm:4.5, tpts:2026, t3pm:186, photoId:"duranke01"},
+    {n:"Jalen Brunson", team:"NYK", pos:"PG", ppg:26, rpg:3.3, apg:6.8, fgpct:0.467, tppct:0.369, ftpct:0.841, bpm:3.1, tpts:1927, t3pm:195, photoId:"brunsja01"},
+    {n:"Donovan Mitchell", team:"CLE", pos:"SG", ppg:27.9, rpg:4.5, apg:5.7, fgpct:0.483, tppct:0.364, ftpct:0.865, bpm:5.1, tpts:1952, t3pm:224, photoId:"mitchdo01"},
+    {n:"Cade Cunningham", team:"DET", pos:"PG", ppg:23.9, rpg:5.5, apg:9.9, fgpct:0.461, tppct:0.342, ftpct:0.812, bpm:6.3, tpts:1531, t3pm:125, photoId:"cunnica01"},
+    {n:"Tyrese Maxey", team:"PHI", pos:"PG", ppg:28.3, rpg:4.1, apg:6.6, fgpct:0.462, tppct:0.367, ftpct:0.892, bpm:5.4, tpts:1980, t3pm:220, photoId:"maxeyty01"},
+    {n:"Jaylen Brown", team:"BOS", pos:"SF", ppg:28.7, rpg:6.9, apg:5.1, fgpct:0.477, tppct:0.347, ftpct:0.795, bpm:3.3, tpts:2038, t3pm:140, photoId:"brownja02"},
+    {n:"Kawhi Leonard", team:"LAC", pos:"SF", ppg:27.9, rpg:6.4, apg:3.6, fgpct:0.505, tppct:0.387, ftpct:0.892, bpm:8, tpts:1813, t3pm:172, photoId:"leonaka01"},
+    {n:"Devin Booker", team:"PHO", pos:"SG", ppg:26.1, rpg:3.9, apg:6, fgpct:0.456, tppct:0.33, ftpct:0.873, bpm:2.2, tpts:1668, t3pm:122, photoId:"bookede01"},
+    {n:"Ja Morant", team:"MEM", pos:"PG", ppg:19.5, rpg:3.3, apg:8.1, fgpct:0.41, tppct:0.235, ftpct:0.897, bpm:-1.5, tpts:389, t3pm:20, photoId:"moranja01"},
+    {n:"James Harden", team:"2TM", pos:"PG", ppg:23.6, rpg:4.8, apg:8, fgpct:0.434, tppct:0.375, ftpct:0.884, bpm:3.9, tpts:1652, t3pm:215, photoId:"hardeja01"},
+    {n:"Anthony Davis", team:"DAL", pos:"PF", ppg:20.4, rpg:11.1, apg:2.8, fgpct:0.506, tppct:0.27, ftpct:0.728, bpm:2.4, tpts:407, t3pm:10, photoId:"davisan02"},
+    {n:"Jalen Williams", team:"OKC", pos:"SG", ppg:17.1, rpg:4.6, apg:5.5, fgpct:0.484, tppct:0.299, ftpct:0.837, bpm:2.1, tpts:563, t3pm:23, photoId:"willija06"},
+    {n:"Chet Holmgren", team:"OKC", pos:"PF", ppg:17.1, rpg:8.9, apg:1.7, fgpct:0.557, tppct:0.362, ftpct:0.792, bpm:4.2, tpts:1181, t3pm:88, photoId:"holmgch01"},
+    {n:"Alperen Sengun", team:"HOU", pos:"C", ppg:20.4, rpg:8.9, apg:6.2, fgpct:0.519, tppct:0.305, ftpct:0.691, bpm:4.2, tpts:1466, t3pm:40, photoId:"sengual01"},
+    {n:"Evan Mobley", team:"CLE", pos:"PF", ppg:18.2, rpg:9, apg:3.6, fgpct:0.546, tppct:0.297, ftpct:0.606, bpm:3, tpts:1180, t3pm:62, photoId:"mobleev01"},
+    {n:"Trae Young", team:"2TM", pos:"PG", ppg:17.9, rpg:2, apg:8, fgpct:0.458, tppct:0.338, ftpct:0.825, bpm:2.8, tpts:269, t3pm:27, photoId:"youngtr01"},
+    {n:"Paolo Banchero", team:"ORL", pos:"PF", ppg:22.2, rpg:8.4, apg:5.2, fgpct:0.459, tppct:0.305, ftpct:0.775, bpm:1.4, tpts:1599, t3pm:84, photoId:"banchpa01"},
+    {n:"Franz Wagner", team:"ORL", pos:"SF", ppg:20.6, rpg:5.2, apg:3.3, fgpct:0.481, tppct:0.345, ftpct:0.823, bpm:2.5, tpts:699, t3pm:48, photoId:"wagnefr01"},
+    {n:"Bam Adebayo", team:"MIA", pos:"C", ppg:20.1, rpg:10, apg:3.2, fgpct:0.442, tppct:0.318, ftpct:0.778, bpm:2, tpts:1468, t3pm:127, photoId:"adebaba01"},
+    {n:"Jimmy Butler", team:"GSW", pos:"SF", ppg:20, rpg:5.6, apg:4.9, fgpct:0.519, tppct:0.376, ftpct:0.864, bpm:5.5, tpts:760, t3pm:32, photoId:"butleji01"},
+    {n:"De'Aaron Fox", team:"SAS", pos:"PG", ppg:18.6, rpg:3.8, apg:6.2, fgpct:0.486, tppct:0.332, ftpct:0.76, bpm:2.2, tpts:1336, t3pm:131, photoId:"foxde01"},
+    {n:"Jamal Murray", team:"DEN", pos:"PG", ppg:25.4, rpg:4.4, apg:7.1, fgpct:0.483, tppct:0.435, ftpct:0.887, bpm:4.1, tpts:1905, t3pm:245, photoId:"murraja01"},
+    {n:"Zion Williamson", team:"NOP", pos:"PF", ppg:21, rpg:5.7, apg:3.2, fgpct:0.6, tppct:0.25, ftpct:0.716, bpm:2.9, tpts:1302, t3pm:1, photoId:"willizi01"},
+    {n:"LaMelo Ball", team:"CHO", pos:"PG", ppg:20.1, rpg:4.8, apg:7.1, fgpct:0.407, tppct:0.368, ftpct:0.899, bpm:4.7, tpts:1445, t3pm:272, photoId:"ballla01"},
+    {n:"Scottie Barnes", team:"TOR", pos:"PF", ppg:18.1, rpg:7.5, apg:5.9, fgpct:0.507, tppct:0.304, ftpct:0.815, bpm:4.2, tpts:1448, t3pm:68, photoId:"barnesc01"},
+    {n:"Jalen Johnson", team:"ATL", pos:"SF", ppg:22.5, rpg:10.3, apg:7.9, fgpct:0.489, tppct:0.352, ftpct:0.788, bpm:4.2, tpts:1621, t3pm:120, photoId:"johnsja05"},
+    {n:"Deni Avdija", team:"POR", pos:"SF", ppg:24.2, rpg:6.9, apg:6.7, fgpct:0.462, tppct:0.318, ftpct:0.802, bpm:4.3, tpts:1598, t3pm:125, photoId:"avdijde01"},
+    {n:"Jalen Duren", team:"DET", pos:"C", ppg:19.5, rpg:10.5, apg:2, fgpct:0.65, tppct:null, ftpct:0.747, bpm:5, tpts:1365, t3pm:0, photoId:"durenja01"},
+    {n:"Cooper Flagg", team:"DAL", pos:"SF", ppg:21, rpg:6.7, apg:4.5, fgpct:0.468, tppct:0.295, ftpct:0.827, bpm:1.4, tpts:1473, t3pm:72, photoId:"flaggco01"},
+    {n:"Amen Thompson", team:"HOU", pos:"PG", ppg:18.3, rpg:7.8, apg:5.3, fgpct:0.534, tppct:0.216, ftpct:0.779, bpm:2.6, tpts:1443, t3pm:25, photoId:"thompam01"},
+    {n:"Pascal Siakam", team:"IND", pos:"PF", ppg:24, rpg:6.6, apg:3.8, fgpct:0.484, tppct:0.358, ftpct:0.693, bpm:0.7, tpts:1485, t3pm:105, photoId:"siakapa01"},
+    {n:"Karl-Anthony Towns", team:"NYK", pos:"C", ppg:20.1, rpg:11.9, apg:3, fgpct:0.501, tppct:0.368, ftpct:0.858, bpm:3.3, tpts:1504, t3pm:113, photoId:"townska01"},
+    {n:"Domantas Sabonis", team:"SAC", pos:"C", ppg:15.8, rpg:11.4, apg:4.1, fgpct:0.543, tppct:0.185, ftpct:0.727, bpm:0.6, tpts:301, t3pm:5, photoId:"sabondo01"},
+    {n:"Desmond Bane", team:"ORL", pos:"SG", ppg:20.1, rpg:4.1, apg:4.1, fgpct:0.484, tppct:0.391, ftpct:0.908, bpm:1.4, tpts:1647, t3pm:167, photoId:"banede01"},
+    {n:"Brandon Miller", team:"CHO", pos:"SF", ppg:20.2, rpg:4.9, apg:3.3, fgpct:0.435, tppct:0.383, ftpct:0.892, bpm:1.6, tpts:1311, t3pm:204, photoId:"millebr02"},
+    {n:"Derrick White", team:"BOS", pos:"SG", ppg:16.5, rpg:4.4, apg:5.4, fgpct:0.394, tppct:0.327, ftpct:0.902, bpm:3.2, tpts:1267, t3pm:209, photoId:"whitede01"},
+    {n:"OG Anunoby", team:"NYK", pos:"PF", ppg:16.7, rpg:5.2, apg:2.2, fgpct:0.484, tppct:0.386, ftpct:0.828, bpm:2, tpts:1118, t3pm:157, photoId:"anunoog01"},
+    {n:"Joel Embiid", team:"PHI", pos:"C", ppg:26.9, rpg:7.7, apg:3.9, fgpct:0.489, tppct:0.333, ftpct:0.854, bpm:4.9, tpts:1021, t3pm:53, photoId:"embiijo01"},
+    {n:"Julius Randle", team:"MIN", pos:"PF", ppg:21.1, rpg:6.7, apg:5, fgpct:0.481, tppct:0.315, ftpct:0.802, bpm:1.5, tpts:1667, t3pm:109, photoId:"randlju01"},
+    {n:"Lauri Markkanen", team:"UTA", pos:"PF", ppg:26.7, rpg:6.9, apg:2.1, fgpct:0.477, tppct:0.355, ftpct:0.896, bpm:2.6, tpts:1123, t3pm:115, photoId:"markkla01"},
+    {n:"DeMar DeRozan", team:"SAC", pos:"PF", ppg:18.4, rpg:2.9, apg:4.1, fgpct:0.497, tppct:0.32, ftpct:0.868, bpm:-0.1, tpts:1419, t3pm:47, photoId:"derozde01"},
+    {n:"Brandon Ingram", team:"TOR", pos:"SF", ppg:21.5, rpg:5.6, apg:3.7, fgpct:0.477, tppct:0.382, ftpct:0.82, bpm:0.5, tpts:1655, t3pm:135, photoId:"ingrabr01"},
+    {n:"Darius Garland", team:"2TM", pos:"PG", ppg:18.8, rpg:2.4, apg:6.7, fgpct:0.46, tppct:0.396, ftpct:0.861, bpm:-0.2, tpts:845, t3pm:122, photoId:"garlada01"},
+    {n:"Jalen Green", team:"PHO", pos:"SG", ppg:17.8, rpg:3.6, apg:2.8, fgpct:0.422, tppct:0.313, ftpct:0.747, bpm:-1.1, tpts:568, t3pm:71, photoId:"greenja05"},
+    {n:"Tyler Herro", team:"MIA", pos:"SG", ppg:20.5, rpg:4.8, apg:4.1, fgpct:0.48, tppct:0.378, ftpct:0.917, bpm:2, tpts:677, t3pm:84, photoId:"herroty01"},
+    {n:"Michael Porter Jr.", team:"BRK", pos:"SF", ppg:24.2, rpg:7.1, apg:3, fgpct:0.463, tppct:0.363, ftpct:0.859, bpm:3, tpts:1259, t3pm:176, photoId:"portemi01"},
+    {n:"Mikal Bridges", team:"NYK", pos:"SF", ppg:14.4, rpg:3.8, apg:3.7, fgpct:0.49, tppct:0.371, ftpct:0.827, bpm:2.7, tpts:1181, t3pm:156, photoId:"bridgmi01"},
+    {n:"Josh Giddey", team:"CHI", pos:"PG", ppg:17, rpg:8.3, apg:9.1, fgpct:0.448, tppct:0.364, ftpct:0.763, bpm:2.7, tpts:919, t3pm:103, photoId:"giddejo01"},
+    {n:"Coby White", team:"2TM", pos:"SG", ppg:17.4, rpg:3.4, apg:4, fgpct:0.446, tppct:0.362, ftpct:0.817, bpm:-1.3, tpts:868, t3pm:115, photoId:"whiteco01"},
+    {n:"Trey Murphy III", team:"NOP", pos:"SF", ppg:21.5, rpg:5.7, apg:3.8, fgpct:0.47, tppct:0.379, ftpct:0.886, bpm:2.4, tpts:1420, t3pm:214, photoId:"murphtr02"},
+    {n:"Austin Reaves", team:"LAL", pos:"SG", ppg:23.3, rpg:4.7, apg:5.5, fgpct:0.49, tppct:0.36, ftpct:0.871, bpm:2.8, tpts:1187, t3pm:118, photoId:"reaveau01"},
+    {n:"Kristaps Porzingis", team:"2TM", pos:"C", ppg:16.7, rpg:5.2, apg:2.5, fgpct:0.446, tppct:0.338, ftpct:0.842, bpm:1.9, tpts:533, t3pm:54, photoId:"porzikr01"},
+    {n:"Myles Turner", team:"MIL", pos:"C", ppg:11.9, rpg:5.3, apg:1.5, fgpct:0.44, tppct:0.383, ftpct:0.74, bpm:-0.9, tpts:846, t3pm:147, photoId:"turnemy01"},
+    {n:"Rudy Gobert", team:"MIN", pos:"C", ppg:10.9, rpg:11.5, apg:1.7, fgpct:0.682, tppct:0, ftpct:0.526, bpm:1, tpts:829, t3pm:0, photoId:"goberru01"},
+    {n:"Jarrett Allen", team:"CLE", pos:"C", ppg:15.4, rpg:8.5, apg:1.8, fgpct:0.638, tppct:0.1, ftpct:0.709, bpm:2.6, tpts:860, t3pm:1, photoId:"allenja01"},
+    {n:"Scoot Henderson", team:"POR", pos:"PG", ppg:14.2, rpg:2.7, apg:3.7, fgpct:0.418, tppct:0.352, ftpct:0.84, bpm:-2.2, tpts:427, t3pm:57, photoId:"hendesc01"},
+    {n:"Jaren Jackson Jr.", team:"2TM", pos:"C", ppg:19.4, rpg:5.7, apg:2, fgpct:0.476, tppct:0.357, ftpct:0.803, bpm:-0.6, tpts:931, t3pm:84, photoId:"jacksja02"},
+    {n:"Zach LaVine", team:"SAC", pos:"SG", ppg:19.2, rpg:2.8, apg:2.3, fgpct:0.479, tppct:0.39, ftpct:0.88, bpm:-1.5, tpts:748, t3pm:99, photoId:"lavinza01"},
+    {n:"Jordan Poole", team:"NOP", pos:"PG", ppg:13.4, rpg:2, apg:3.1, fgpct:0.372, tppct:0.333, ftpct:0.86, bpm:-3.5, tpts:524, t3pm:96, photoId:"poolejo01"},
+    {n:"CJ McCollum", team:"2TM", pos:"PG", ppg:18.7, rpg:3.3, apg:3.9, fgpct:0.455, tppct:0.375, ftpct:0.772, bpm:-0.3, tpts:1424, t3pm:191, photoId:"mccolcj01"},
+    {n:"Norman Powell", team:"MIA", pos:"SG", ppg:21.7, rpg:3.5, apg:2.5, fgpct:0.47, tppct:0.38, ftpct:0.827, bpm:1.6, tpts:1261, t3pm:156, photoId:"powelno01"},
+    {n:"Cam Thomas", team:"2TM", pos:"SG", ppg:13.5, rpg:1.7, apg:2.6, fgpct:0.41, tppct:0.31, ftpct:0.811, bpm:-5.2, tpts:567, t3pm:52, photoId:"thomaca02"},
+    {n:"Anfernee Simons", team:"2TM", pos:"SG", ppg:14.3, rpg:2.5, apg:2.4, fgpct:0.44, tppct:0.385, ftpct:0.896, bpm:-0.1, tpts:785, t3pm:146, photoId:"simonan01"},
+    {n:"Immanuel Quickley", team:"TOR", pos:"PG", ppg:16.4, rpg:4, apg:5.9, fgpct:0.443, tppct:0.374, ftpct:0.821, bpm:2.4, tpts:1150, t3pm:178, photoId:"quickim01"},
+    {n:"RJ Barrett", team:"TOR", pos:"SF", ppg:19.3, rpg:5.3, apg:3.3, fgpct:0.491, tppct:0.339, ftpct:0.717, bpm:0.2, tpts:1098, t3pm:96, photoId:"barrerj01"},
+    {n:"Aaron Gordon", team:"DEN", pos:"PF", ppg:16.2, rpg:5.8, apg:2.7, fgpct:0.497, tppct:0.389, ftpct:0.767, bpm:1.7, tpts:582, t3pm:61, photoId:"gordoaa01"},
+    {n:"Andrew Wiggins", team:"MIA", pos:"SF", ppg:15.4, rpg:4.8, apg:2.7, fgpct:0.475, tppct:0.414, ftpct:0.784, bpm:1.2, tpts:1045, t3pm:138, photoId:"wiggian01"},
+    {n:"Draymond Green", team:"GSW", pos:"PF", ppg:8.4, rpg:5.5, apg:5.5, fgpct:0.418, tppct:0.326, ftpct:0.702, bpm:-1.4, tpts:570, t3pm:101, photoId:"greendr01"},
+    {n:"Jonathan Kuminga", team:"2TM", pos:"PF", ppg:12.2, rpg:5.6, apg:2.3, fgpct:0.463, tppct:0.333, ftpct:0.724, bpm:-2, tpts:438, t3pm:35, photoId:"kuminjo01"},
+    {n:"Jrue Holiday", team:"POR", pos:"PG", ppg:16.3, rpg:4.6, apg:6.1, fgpct:0.451, tppct:0.378, ftpct:0.838, bpm:1.9, tpts:865, t3pm:137, photoId:"holidjr01"},
+    {n:"Brook Lopez", team:"LAC", pos:"C", ppg:8.5, rpg:3.6, apg:1.3, fgpct:0.428, tppct:0.36, ftpct:0.757, bpm:-0.9, tpts:634, t3pm:114, photoId:"lopezbr01"},
+    {n:"Naz Reid", team:"MIN", pos:"C", ppg:13.6, rpg:6.2, apg:2.2, fgpct:0.456, tppct:0.362, ftpct:0.732, bpm:0.9, tpts:1046, t3pm:162, photoId:"reidna01"},
+    {n:"Dillon Brooks", team:"PHO", pos:"SF", ppg:20.2, rpg:3.6, apg:1.8, fgpct:0.435, tppct:0.344, ftpct:0.842, bpm:-2.3, tpts:1131, t3pm:127, photoId:"brookdi01"},
+    {n:"Jabari Smith Jr.", team:"HOU", pos:"PF", ppg:15.8, rpg:6.9, apg:1.9, fgpct:0.45, tppct:0.363, ftpct:0.775, bpm:-0.7, tpts:1215, t3pm:177, photoId:"smithja05"},
+    {n:"Keegan Murray", team:"SAC", pos:"PF", ppg:14, rpg:5.7, apg:1.7, fgpct:0.42, tppct:0.277, ftpct:0.776, bpm:-3.1, tpts:321, t3pm:31, photoId:"murrake02"},
+    {n:"Ivica Zubac", team:"2TM", pos:"C", ppg:14.1, rpg:10.6, apg:2.2, fgpct:0.598, tppct:null, ftpct:0.711, bpm:-0.3, tpts:677, t3pm:0, photoId:"zubaciv01"},
+    {n:"Walker Kessler", team:"UTA", pos:"C", ppg:14.4, rpg:10.8, apg:3, fgpct:0.703, tppct:0.75, ftpct:0.7, bpm:3.3, tpts:72, t3pm:6, photoId:"kesslwa01"},
+    {n:"Dyson Daniels", team:"ATL", pos:"SG", ppg:11.9, rpg:6.8, apg:5.9, fgpct:0.517, tppct:0.188, ftpct:0.615, bpm:1.3, tpts:901, t3pm:22, photoId:"daniedy01"},
+    {n:"Alex Caruso", team:"OKC", pos:"SG", ppg:6.2, rpg:2.8, apg:2, fgpct:0.423, tppct:0.293, ftpct:0.804, bpm:1.9, tpts:348, t3pm:53, photoId:"carusal01"},
+    {n:"Josh Hart", team:"NYK", pos:"SF", ppg:12, rpg:7.4, apg:4.8, fgpct:0.508, tppct:0.413, ftpct:0.72, bpm:3, tpts:792, t3pm:100, photoId:"hartjo01"},
+    {n:"Payton Pritchard", team:"BOS", pos:"PG", ppg:17, rpg:3.9, apg:5.2, fgpct:0.464, tppct:0.377, ftpct:0.89, bpm:2.3, tpts:1345, t3pm:212, photoId:"pritcpa01"},
+    {n:"Christian Braun", team:"DEN", pos:"SG", ppg:12, rpg:4.8, apg:2.7, fgpct:0.519, tppct:0.301, ftpct:0.782, bpm:-1.2, tpts:526, t3pm:43, photoId:"braunch01"},
+    {n:"Toumani Camara", team:"POR", pos:"PF", ppg:13.4, rpg:5.1, apg:2.5, fgpct:0.44, tppct:0.37, ftpct:0.708, bpm:-1, tpts:1100, t3pm:219, photoId:"camarto01"},
+    {n:"VJ Edgecombe", team:"PHI", pos:"SG", ppg:16, rpg:5.6, apg:4.2, fgpct:0.438, tppct:0.354, ftpct:0.818, bpm:-0.5, tpts:1199, t3pm:149, photoId:"edgecvj01"},
+    {n:"Kon Knueppel", team:"CHO", pos:"SF", ppg:18.5, rpg:5.3, apg:3.4, fgpct:0.475, tppct:0.425, ftpct:0.863, bpm:2.8, tpts:1498, t3pm:273, photoId:"knuepko01"},
+    {n:"Dylan Harper", team:"SAS", pos:"SG", ppg:11.8, rpg:3.4, apg:3.9, fgpct:0.505, tppct:0.343, ftpct:0.756, bpm:1.4, tpts:813, t3pm:61, photoId:"harpedy01"},
+    {n:"Ace Bailey", team:"UTA", pos:"SF", ppg:13.8, rpg:4.2, apg:1.8, fgpct:0.443, tppct:0.344, ftpct:0.75, bpm:-4.4, tpts:993, t3pm:137, photoId:"baileac01"}
+  ];
+
+  var CURRENT_CATEGORIES = [
+    { key:"ppg", label:"PPG", hint:"2025–26 season, per game",
+      unit:"PPG", min:0, max:34, duration:900,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"rpg", label:"RPG", hint:"2025–26 season, per game",
+      unit:"RPG", min:0, max:13, duration:1150,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"apg", label:"APG", hint:"2025–26 season, per game",
+      unit:"APG", min:0, max:11, duration:1150,
+      fmt:function(v){ return v.toFixed(1); } },
+    { key:"fgpct", label:"FIELD GOAL %", hint:"2025–26 season shooting",
+      unit:"", min:0.30, max:0.72, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"tppct", label:"3-POINT %", hint:"2025–26 season shooting",
+      unit:"", min:0, max:0.76, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"ftpct", label:"FREE THROW %", hint:"2025–26 season shooting",
+      unit:"", min:0.45, max:0.93, duration:900,
+      fmt:function(v){ return (v*100).toFixed(1) + "%"; } },
+    { key:"bpm", label:"BOX PLUS/MINUS", hint:"2025–26 season, per 100 possessions",
+      unit:"BPM", min:-6, max:15, duration:1000,
+      fmt:function(v){ return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1); } },
+    { key:"tpts", label:"SEASON POINTS", hint:"Total points scored, 2025–26 season",
+      unit:"PTS", min:0, max:2200, duration:950,
+      fmt:function(v){ return Math.round(v).toLocaleString(); } },
+    { key:"t3pm", label:"SEASON 3PM", hint:"Total 3-pointers made, 2025–26 season",
+      unit:"3PM", min:0, max:280, duration:950,
+      fmt:function(v){ return Math.round(v).toLocaleString(); } }
+  ];
+
+  // ---------------------------------------------------------------
+  // Starting Five: a separate, purpose-built mini-game and dataset.
+  // Neither PLAYERS nor CURRENT_PLAYERS carries single-game career-high
+  // scoring, PG/SG/SF/PF/C-level positions, or per-franchise career
+  // history, so rather than invent any of that onto the existing pools,
+  // this is a curated 197-player roster with those three fields
+  // verified via web research (StatMuse / Basketball-Reference /
+  // official team sites, including 2025-26 offseason trades) on
+  // 2026-09-25. `teams` uses only the 30 current-franchise codes below
+  // — any relocated or rebranded historical team (e.g. Seattle
+  // SuperSonics, New Jersey Nets, the original Charlotte Hornets) is
+  // already folded into its legal successor franchise's code. This
+  // game intentionally does not use player photos.
+  // ---------------------------------------------------------------
+  var SF_FRANCHISES = [{"code":"ATL","name":"Atlanta Hawks"},{"code":"BOS","name":"Boston Celtics"},{"code":"BRK","name":"Brooklyn Nets"},{"code":"CHA","name":"Charlotte Hornets"},{"code":"CHI","name":"Chicago Bulls"},{"code":"CLE","name":"Cleveland Cavaliers"},{"code":"DAL","name":"Dallas Mavericks"},{"code":"DEN","name":"Denver Nuggets"},{"code":"DET","name":"Detroit Pistons"},{"code":"GSW","name":"Golden State Warriors"},{"code":"HOU","name":"Houston Rockets"},{"code":"IND","name":"Indiana Pacers"},{"code":"LAC","name":"LA Clippers"},{"code":"LAL","name":"Los Angeles Lakers"},{"code":"MEM","name":"Memphis Grizzlies"},{"code":"MIA","name":"Miami Heat"},{"code":"MIL","name":"Milwaukee Bucks"},{"code":"MIN","name":"Minnesota Timberwolves"},{"code":"NOP","name":"New Orleans Pelicans"},{"code":"NYK","name":"New York Knicks"},{"code":"OKC","name":"Oklahoma City Thunder"},{"code":"ORL","name":"Orlando Magic"},{"code":"PHI","name":"Philadelphia 76ers"},{"code":"PHO","name":"Phoenix Suns"},{"code":"POR","name":"Portland Trail Blazers"},{"code":"SAC","name":"Sacramento Kings"},{"code":"SAS","name":"San Antonio Spurs"},{"code":"TOR","name":"Toronto Raptors"},{"code":"UTA","name":"Utah Jazz"},{"code":"WAS","name":"Washington Wizards"}];
+
+  // Each franchise's real primary brand color, used to color a filled
+  // lineup slot and the franchise-reveal spinner. Real logos (fetched
+  // from team-logos.json, shipped alongside this page, same pattern as
+  // players-photos.json below) exist for most but not all 30 franchises;
+  // sfTeamBadgeHtml() below falls back to a plain colored initial badge
+  // for any franchise with no logo on file, so the game is never broken
+  // by a missing image.
+  var SF_TEAM_COLOR = {
+    ATL:"#C8102E", BOS:"#007A33", BRK:"#000000", CHA:"#00788C", CHI:"#CE1141",
+    CLE:"#860038", DAL:"#00538C", DEN:"#0E2240", DET:"#C8102E", GSW:"#1D428A",
+    HOU:"#CE1141", IND:"#002D62", LAC:"#C8102E", LAL:"#552583", MEM:"#5D76A9",
+    MIA:"#98002E", MIL:"#00471B", MIN:"#0C2340", NOP:"#0C2340", NYK:"#006BB6",
+    OKC:"#007AC1", ORL:"#0057B8", PHI:"#006BB6", PHO:"#1D1160", POR:"#E03A3E",
+    SAC:"#5A2D81", SAS:"#000000", TOR:"#CE1141", UTA:"#002B5C", WAS:"#002B5C"
+  };
+  function sfTeamColor(code){ return SF_TEAM_COLOR[code] || "#3E2414"; }
+  // Perceptual-luminance contrast pick: light team colors (Warriors gold,
+  // Pacers/Kings-adjacent yellows, etc.) get near-black text, dark colors
+  // get near-white text -- always legible regardless of which of the 30
+  // brand colors lands.
+  function sfContrastText(hex){
+    var c = hex.replace("#","");
+    var r = parseInt(c.substr(0,2),16)/255, g = parseInt(c.substr(2,2),16)/255, b = parseInt(c.substr(4,2),16)/255;
+    function lin(v){ return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }
+    var lum = 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b);
+    return lum > 0.42 ? "#17110B" : "#FFFCF5";
+  }
+  var SF_LOGOS = {};
+  fetch("team-logos.json").then(function(r){ return r.json(); }).then(function(data){
+    SF_LOGOS = data || {};
+  }).catch(function(){ /* colored initial badges only for every team -- fine */ });
+  // Returns the inner HTML for one team badge: a real logo image when we
+  // have one on file, otherwise a small colored circle with the
+  // franchise's 2-3 letter code.
+  function sfTeamBadgeHtml(code, sizeClass){
+    var url = SF_LOGOS[code];
+    if(url) return '<img class="'+sizeClass+'" src="'+url+'" alt="'+code+'">';
+    return '<span class="'+sizeClass+' sf-badge-fallback" style="background:'+sfTeamColor(code)+';color:'+sfContrastText(sfTeamColor(code))+'">'+code+'</span>';
+  }
+
+  var SF_PLAYERS_RAW = [{"id":"sf001","name":"Stephen Curry","positions":["PG"],"teams":["GSW"],"careerHighPoints":62},{"id":"sf002","name":"Chris Paul","positions":["PG"],"teams":["NOP","LAC","HOU","OKC","PHO","GSW","SAS"],"careerHighPoints":43},{"id":"sf003","name":"John Stockton","positions":["PG"],"teams":["UTA"],"careerHighPoints":34},{"id":"sf004","name":"Steve Nash","positions":["PG"],"teams":["PHO","DAL","LAL"],"careerHighPoints":42},{"id":"sf005","name":"Jason Kidd","positions":["PG"],"teams":["DAL","PHO","BRK","NYK"],"careerHighPoints":43},{"id":"sf006","name":"Magic Johnson","positions":["PG"],"teams":["LAL"],"careerHighPoints":46},{"id":"sf007","name":"Isiah Thomas","positions":["PG"],"teams":["DET"],"careerHighPoints":47},{"id":"sf008","name":"Damian Lillard","positions":["PG"],"teams":["POR","MIL"],"careerHighPoints":71},{"id":"sf009","name":"Trae Young","positions":["PG"],"teams":["ATL","WAS"],"careerHighPoints":56},{"id":"sf010","name":"Russell Westbrook","positions":["PG"],"teams":["OKC","HOU","WAS","LAL","LAC","DEN","SAC"],"careerHighPoints":58},{"id":"sf011","name":"Ja Morant","positions":["PG"],"teams":["MEM","POR"],"careerHighPoints":52},{"id":"sf012","name":"Tony Parker","positions":["PG"],"teams":["SAS","CHA"],"careerHighPoints":55},{"id":"sf013","name":"Kobe Bryant","positions":["SG"],"teams":["LAL"],"careerHighPoints":81},{"id":"sf014","name":"Michael Jordan","positions":["SG","SF"],"teams":["CHI","WAS"],"careerHighPoints":69},{"id":"sf015","name":"James Harden","positions":["SG","PG"],"teams":["OKC","HOU","BRK","PHI","LAC","CLE"],"careerHighPoints":61},{"id":"sf016","name":"Dwyane Wade","positions":["SG"],"teams":["MIA","CHI","CLE"],"careerHighPoints":55},{"id":"sf017","name":"Allen Iverson","positions":["SG","PG"],"teams":["PHI","DEN","DET","MEM"],"careerHighPoints":60},{"id":"sf018","name":"Klay Thompson","positions":["SG"],"teams":["GSW","DAL"],"careerHighPoints":60},{"id":"sf019","name":"Ray Allen","positions":["SG"],"teams":["MIL","OKC","BOS","MIA"],"careerHighPoints":54},{"id":"sf020","name":"Reggie Miller","positions":["SG"],"teams":["IND"],"careerHighPoints":57},{"id":"sf021","name":"Vince Carter","positions":["SG","SF"],"teams":["TOR","BRK","ORL","PHO","DAL","MEM","SAC","ATL"],"careerHighPoints":51},{"id":"sf022","name":"Devin Booker","positions":["SG"],"teams":["PHO"],"careerHighPoints":70},{"id":"sf023","name":"Donovan Mitchell","positions":["SG"],"teams":["UTA","CLE"],"careerHighPoints":71},{"id":"sf024","name":"LeBron James","positions":["SF","PF"],"teams":["CLE","MIA","LAL"],"careerHighPoints":61},{"id":"sf025","name":"Kevin Durant","positions":["SF","PF"],"teams":["OKC","GSW","BRK","PHO","HOU"],"careerHighPoints":54},{"id":"sf026","name":"Kawhi Leonard","positions":["SF"],"teams":["SAS","TOR","LAC"],"careerHighPoints":55},{"id":"sf027","name":"Larry Bird","positions":["SF","PF"],"teams":["BOS"],"careerHighPoints":60},{"id":"sf028","name":"Julius Erving","positions":["SF"],"teams":["PHI"],"careerHighPoints":45},{"id":"sf029","name":"Scottie Pippen","positions":["SF"],"teams":["CHI","HOU","POR"],"careerHighPoints":47},{"id":"sf030","name":"Paul Pierce","positions":["SF","SG"],"teams":["BOS","BRK","WAS","LAC"],"careerHighPoints":50},{"id":"sf031","name":"Carmelo Anthony","positions":["SF","PF"],"teams":["DEN","NYK","OKC","HOU","POR","LAL"],"careerHighPoints":62},{"id":"sf032","name":"Jayson Tatum","positions":["SF","PF"],"teams":["BOS"],"careerHighPoints":60},{"id":"sf033","name":"Grant Hill","positions":["SF"],"teams":["DET","ORL","PHO","LAC"],"careerHighPoints":46},{"id":"sf034","name":"Tracy McGrady","positions":["SG","SF"],"teams":["TOR","ORL","HOU","NYK","DET","ATL","SAS"],"careerHighPoints":62},{"id":"sf035","name":"Tim Duncan","positions":["PF","C"],"teams":["SAS"],"careerHighPoints":53},{"id":"sf036","name":"Karl Malone","positions":["PF"],"teams":["UTA","LAL"],"careerHighPoints":61},{"id":"sf037","name":"Kevin Garnett","positions":["PF"],"teams":["MIN","BOS","BRK"],"careerHighPoints":47},{"id":"sf038","name":"Charles Barkley","positions":["PF","SF"],"teams":["PHI","PHO","HOU"],"careerHighPoints":56},{"id":"sf039","name":"Dirk Nowitzki","positions":["PF"],"teams":["DAL"],"careerHighPoints":53},{"id":"sf040","name":"Giannis Antetokounmpo","positions":["PF"],"teams":["MIL","MIA"],"careerHighPoints":64},{"id":"sf041","name":"Chris Webber","positions":["PF","C"],"teams":["GSW","WAS","SAC","PHI","DET"],"careerHighPoints":51},{"id":"sf042","name":"Blake Griffin","positions":["PF"],"teams":["LAC","DET","BRK","BOS"],"careerHighPoints":50},{"id":"sf043","name":"Pau Gasol","positions":["PF","C"],"teams":["MEM","LAL","CHI","SAS","MIL"],"careerHighPoints":46},{"id":"sf044","name":"Anthony Davis","positions":["C","PF"],"teams":["NOP","LAL","DAL","WAS"],"careerHighPoints":59},{"id":"sf045","name":"Draymond Green","positions":["PF"],"teams":["GSW"],"careerHighPoints":31},{"id":"sf046","name":"Shaquille O'Neal","positions":["C"],"teams":["ORL","LAL","MIA","PHO","CLE","BOS"],"careerHighPoints":61},{"id":"sf047","name":"Hakeem Olajuwon","positions":["C"],"teams":["HOU","TOR"],"careerHighPoints":52},{"id":"sf048","name":"David Robinson","positions":["C"],"teams":["SAS"],"careerHighPoints":71},{"id":"sf049","name":"Patrick Ewing","positions":["C"],"teams":["NYK","OKC","ORL"],"careerHighPoints":51},{"id":"sf050","name":"Kareem Abdul-Jabbar","positions":["C"],"teams":["MIL","LAL"],"careerHighPoints":55},{"id":"sf051","name":"Dwight Howard","positions":["C"],"teams":["ORL","LAL","HOU","ATL","CHA","WAS","PHI"],"careerHighPoints":45},{"id":"sf052","name":"Yao Ming","positions":["C"],"teams":["HOU"],"careerHighPoints":41},{"id":"sf053","name":"Joel Embiid","positions":["C"],"teams":["PHI"],"careerHighPoints":70},{"id":"sf054","name":"Nikola Jokic","positions":["C"],"teams":["DEN"],"careerHighPoints":61},{"id":"sf055","name":"Rudy Gobert","positions":["C"],"teams":["UTA","MIN"],"careerHighPoints":35},{"id":"sf056","name":"Alonzo Mourning","positions":["C"],"teams":["MIA","BRK"],"careerHighPoints":50},{"id":"sf057","name":"Kyrie Irving","positions":["PG"],"teams":["CLE","BOS","BRK","DAL"],"careerHighPoints":60},{"id":"sf058","name":"Derrick Rose","positions":["PG","SG"],"teams":["CHI","NYK","CLE","MIN","DET","MEM"],"careerHighPoints":50},{"id":"sf059","name":"Kemba Walker","positions":["PG"],"teams":["CHA","BOS","NYK","DAL"],"careerHighPoints":60},{"id":"sf060","name":"Mike Conley","positions":["PG"],"teams":["MEM","UTA","MIN"],"careerHighPoints":40},{"id":"sf061","name":"Rajon Rondo","positions":["PG"],"teams":["BOS","DAL","SAC","CHI","NOP","LAL","ATL","LAC","CLE"],"careerHighPoints":35},{"id":"sf062","name":"Jrue Holiday","positions":["PG","SG"],"teams":["PHI","NOP","MIL","BOS","POR"],"careerHighPoints":51},{"id":"sf063","name":"D'Angelo Russell","positions":["PG"],"teams":["LAL","BRK","GSW","MIN","DAL","WAS"],"careerHighPoints":52},{"id":"sf064","name":"Deron Williams","positions":["PG"],"teams":["UTA","BRK","DAL","CLE"],"careerHighPoints":57},{"id":"sf065","name":"Baron Davis","positions":["PG"],"teams":["NOP","GSW","LAC","CLE","NYK"],"careerHighPoints":40},{"id":"sf066","name":"Gilbert Arenas","positions":["PG","SG"],"teams":["GSW","WAS","ORL","MEM"],"careerHighPoints":60},{"id":"sf067","name":"Chauncey Billups","positions":["PG"],"teams":["BOS","TOR","DEN","MIN","DET","NYK","LAC"],"careerHighPoints":39},{"id":"sf068","name":"Steve Francis","positions":["PG"],"teams":["HOU","ORL","NYK"],"careerHighPoints":44},{"id":"sf069","name":"Gary Payton","positions":["PG"],"teams":["OKC","MIL","LAL","BOS","MIA"],"careerHighPoints":44},{"id":"sf070","name":"Tim Hardaway","positions":["PG"],"teams":["GSW","MIA","DAL","DEN","IND"],"careerHighPoints":45},{"id":"sf071","name":"Mark Price","positions":["PG"],"teams":["CLE","WAS","GSW","ORL"],"careerHighPoints":39},{"id":"sf072","name":"Terry Rozier","positions":["PG","SG"],"teams":["BOS","CHA","MIA"],"careerHighPoints":43},{"id":"sf073","name":"Fred VanVleet","positions":["PG","SG"],"teams":["TOR","HOU"],"careerHighPoints":54},{"id":"sf074","name":"Darius Garland","positions":["PG"],"teams":["CLE","LAC"],"careerHighPoints":51},{"id":"sf075","name":"Tyrese Haliburton","positions":["PG"],"teams":["SAC","IND"],"careerHighPoints":44},{"id":"sf076","name":"LaMelo Ball","positions":["PG"],"teams":["CHA"],"careerHighPoints":50},{"id":"sf077","name":"De'Aaron Fox","positions":["PG"],"teams":["SAC","SAS"],"careerHighPoints":60},{"id":"sf078","name":"Shai Gilgeous-Alexander","positions":["PG","SG"],"teams":["LAC","OKC"],"careerHighPoints":55},{"id":"sf079","name":"Luka Doncic","positions":["PG","SG"],"teams":["DAL","LAL"],"careerHighPoints":73},{"id":"sf080","name":"Cade Cunningham","positions":["PG"],"teams":["DET"],"careerHighPoints":46},{"id":"sf081","name":"Jalen Brunson","positions":["PG"],"teams":["DAL","NYK"],"careerHighPoints":61},{"id":"sf082","name":"Sam Cassell","positions":["PG"],"teams":["HOU","PHO","DAL","BRK","MIL","MIN","LAC","BOS"],"careerHighPoints":40},{"id":"sf083","name":"Nate Archibald","positions":["PG"],"teams":["SAC","BRK","BOS","MIL"],"careerHighPoints":55},{"id":"sf084","name":"Norm Nixon","positions":["PG"],"teams":["LAL","LAC"],"careerHighPoints":39},{"id":"sf085","name":"Kevin Johnson","positions":["PG"],"teams":["CLE","PHO"],"careerHighPoints":44},{"id":"sf086","name":"Muggsy Bogues","positions":["PG"],"teams":["WAS","NOP","GSW","TOR"],"careerHighPoints":24},{"id":"sf087","name":"Paul George","positions":["SF","PF"],"teams":["IND","OKC","LAC","PHI"],"careerHighPoints":48},{"id":"sf088","name":"Bradley Beal","positions":["SG"],"teams":["WAS","PHO","LAC"],"careerHighPoints":60},{"id":"sf089","name":"Zach LaVine","positions":["SG"],"teams":["MIN","CHI","SAC"],"careerHighPoints":51},{"id":"sf090","name":"CJ McCollum","positions":["SG","PG"],"teams":["POR","NOP","WAS","ATL"],"careerHighPoints":50},{"id":"sf091","name":"DeMar DeRozan","positions":["SG","SF"],"teams":["TOR","SAS","CHI","SAC"],"careerHighPoints":52},{"id":"sf092","name":"Jamal Crawford","positions":["SG"],"teams":["CHI","NYK","GSW","ATL","POR","LAC","MIN","PHO","BRK"],"careerHighPoints":52},{"id":"sf093","name":"Manu Ginobili","positions":["SG","SF"],"teams":["SAS"],"careerHighPoints":48},{"id":"sf094","name":"J.R. Smith","positions":["SG","SF"],"teams":["NOP","DEN","NYK","CLE","LAL"],"careerHighPoints":45},{"id":"sf095","name":"Rip Hamilton","positions":["SG"],"teams":["WAS","DET","CHI"],"careerHighPoints":51},{"id":"sf096","name":"Lou Williams","positions":["SG","PG"],"teams":["PHI","ATL","TOR","LAL","HOU","LAC"],"careerHighPoints":50},{"id":"sf097","name":"Danny Green","positions":["SG","SF"],"teams":["CLE","SAS","TOR","LAL","PHI","MEM"],"careerHighPoints":33},{"id":"sf098","name":"Jerry West","positions":["SG","PG"],"teams":["LAL"],"careerHighPoints":63},{"id":"sf099","name":"George Gervin","positions":["SG","SF"],"teams":["SAS","CHI"],"careerHighPoints":63},{"id":"sf100","name":"Adrian Dantley","positions":["SF","PF"],"teams":["LAC","IND","LAL","UTA","DET","DAL","MIL"],"careerHighPoints":57},{"id":"sf101","name":"Mitch Richmond","positions":["SG"],"teams":["GSW","SAC","WAS","LAL"],"careerHighPoints":47},{"id":"sf102","name":"Latrell Sprewell","positions":["SG","SF"],"teams":["GSW","NYK","MIN"],"careerHighPoints":49},{"id":"sf103","name":"Penny Hardaway","positions":["PG","SG"],"teams":["ORL","PHO","NYK","MIA"],"careerHighPoints":42},{"id":"sf104","name":"Joe Johnson","positions":["SG","SF"],"teams":["BOS","PHO","ATL","BRK","MIA","UTA","HOU"],"careerHighPoints":42},{"id":"sf105","name":"Jimmy Butler","positions":["SF","SG"],"teams":["CHI","MIN","PHI","MIA","GSW"],"careerHighPoints":53},{"id":"sf106","name":"Kevin Love","positions":["PF","C"],"teams":["MIN","CLE","MIA","UTA"],"careerHighPoints":51},{"id":"sf107","name":"Rudy Gay","positions":["SF","PF"],"teams":["MEM","TOR","SAC","SAS","UTA"],"careerHighPoints":41},{"id":"sf108","name":"Danilo Gallinari","positions":["SF","PF"],"teams":["NYK","DEN","LAC","OKC","ATL","WAS","DET","MIL"],"careerHighPoints":47},{"id":"sf109","name":"Andre Iguodala","positions":["SF","SG"],"teams":["PHI","DEN","GSW","MIA"],"careerHighPoints":34},{"id":"sf110","name":"Shawn Marion","positions":["SF","PF"],"teams":["PHO","MIA","TOR","DAL","CLE"],"careerHighPoints":44},{"id":"sf111","name":"Josh Smith","positions":["PF","SF"],"teams":["ATL","DET","HOU","LAC","NOP"],"careerHighPoints":38},{"id":"sf112","name":"Tayshaun Prince","positions":["SF"],"teams":["DET","MEM","BOS","MIN"],"careerHighPoints":34},{"id":"sf113","name":"Glen Rice","positions":["SF"],"teams":["MIA","NOP","LAL","NYK","HOU","LAC"],"careerHighPoints":56},{"id":"sf114","name":"Dominique Wilkins","positions":["SF"],"teams":["ATL","LAC","BOS","SAS","ORL"],"careerHighPoints":57},{"id":"sf115","name":"Alex English","positions":["SF"],"teams":["MIL","IND","DEN","DAL"],"careerHighPoints":54},{"id":"sf116","name":"Bernard King","positions":["SF"],"teams":["BRK","UTA","GSW","NYK","WAS"],"careerHighPoints":60},{"id":"sf117","name":"Chris Mullin","positions":["SF","SG"],"teams":["GSW","IND"],"careerHighPoints":47},{"id":"sf118","name":"James Worthy","positions":["SF"],"teams":["LAL"],"careerHighPoints":38},{"id":"sf119","name":"Rick Barry","positions":["SF"],"teams":["GSW","HOU"],"careerHighPoints":64},{"id":"sf120","name":"Elgin Baylor","positions":["SF"],"teams":["LAL"],"careerHighPoints":71},{"id":"sf121","name":"DeMarre Carroll","positions":["SF"],"teams":["MEM","HOU","DEN","UTA","ATL","TOR","BRK","SAS"],"careerHighPoints":26},{"id":"sf122","name":"Brandon Ingram","positions":["SF"],"teams":["LAL","NOP","TOR"],"careerHighPoints":49},{"id":"sf123","name":"Khris Middleton","positions":["SF","SG"],"teams":["DET","MIL","WAS","DAL"],"careerHighPoints":51},{"id":"sf124","name":"OG Anunoby","positions":["PF","SF"],"teams":["TOR","NYK"],"careerHighPoints":40},{"id":"sf125","name":"Mikal Bridges","positions":["SG","SF"],"teams":["PHO","BRK","NYK"],"careerHighPoints":45},{"id":"sf126","name":"Jaylen Brown","positions":["SF","SG"],"teams":["BOS","PHI"],"careerHighPoints":50},{"id":"sf127","name":"RJ Barrett","positions":["SG","SF"],"teams":["NYK","TOR"],"careerHighPoints":46},{"id":"sf128","name":"Amar'e Stoudemire","positions":["PF","C"],"teams":["PHO","NYK","DAL","MIA"],"careerHighPoints":50},{"id":"sf129","name":"Zach Randolph","positions":["PF","C"],"teams":["POR","NYK","LAC","MEM","SAC"],"careerHighPoints":43},{"id":"sf130","name":"LaMarcus Aldridge","positions":["PF","C"],"teams":["POR","SAS","BRK"],"careerHighPoints":56},{"id":"sf131","name":"Al Horford","positions":["PF","C"],"teams":["ATL","BOS","PHI","OKC","GSW"],"careerHighPoints":34},{"id":"sf132","name":"Serge Ibaka","positions":["C","PF"],"teams":["OKC","ORL","TOR","LAC","MIL"],"careerHighPoints":34},{"id":"sf133","name":"Rasheed Wallace","positions":["PF","C"],"teams":["WAS","POR","ATL","DET","BOS","NYK"],"careerHighPoints":42},{"id":"sf134","name":"Antoine Walker","positions":["PF","SF"],"teams":["BOS","DAL","ATL","MIA","MIN","MEM"],"careerHighPoints":49},{"id":"sf135","name":"Elton Brand","positions":["PF","C"],"teams":["CHI","LAC","PHI","DAL","ATL"],"careerHighPoints":44},{"id":"sf136","name":"Shawn Kemp","positions":["PF","C"],"teams":["OKC","CLE","POR","ORL"],"careerHighPoints":42},{"id":"sf137","name":"Vin Baker","positions":["PF","C"],"teams":["MIL","OKC","BOS","NYK","HOU","LAC"],"careerHighPoints":33},{"id":"sf138","name":"Chris Bosh","positions":["PF","C"],"teams":["TOR","MIA"],"careerHighPoints":44},{"id":"sf139","name":"Bob McAdoo","positions":["C"],"teams":["LAC","NYK","BOS","DET","BRK","LAL","PHI"],"careerHighPoints":52},{"id":"sf140","name":"Dan Issel","positions":["C","PF"],"teams":["DEN"],"careerHighPoints":47},{"id":"sf141","name":"Elvin Hayes","positions":["PF","C"],"teams":["HOU","WAS"],"careerHighPoints":54},{"id":"sf142","name":"Larry Nance Sr","positions":["PF"],"teams":["PHO","CLE"],"careerHighPoints":45},{"id":"sf143","name":"Buck Williams","positions":["PF"],"teams":["BRK","POR","NYK"],"careerHighPoints":35},{"id":"sf144","name":"Horace Grant","positions":["PF","C"],"teams":["CHI","ORL","OKC","LAL"],"careerHighPoints":31},{"id":"sf145","name":"Dennis Rodman","positions":["PF","SF"],"teams":["DET","SAS","CHI","LAL","DAL"],"careerHighPoints":34},{"id":"sf146","name":"Kevin McHale","positions":["PF"],"teams":["BOS"],"careerHighPoints":56},{"id":"sf147","name":"Domantas Sabonis","positions":["C","PF"],"teams":["OKC","IND","SAC"],"careerHighPoints":42},{"id":"sf148","name":"Julius Randle","positions":["PF","C"],"teams":["LAL","NOP","NYK","MIN","BRK"],"careerHighPoints":57},{"id":"sf149","name":"Zion Williamson","positions":["PF"],"teams":["NOP"],"careerHighPoints":43},{"id":"sf150","name":"Paolo Banchero","positions":["PF"],"teams":["ORL"],"careerHighPoints":50},{"id":"sf151","name":"Jaren Jackson Jr","positions":["PF","C"],"teams":["MEM","UTA"],"careerHighPoints":40},{"id":"sf152","name":"Bam Adebayo","positions":["C","PF"],"teams":["MIA"],"careerHighPoints":83},{"id":"sf153","name":"Aaron Gordon","positions":["PF","SF"],"teams":["ORL","DEN"],"careerHighPoints":50},{"id":"sf154","name":"Moses Malone","positions":["C"],"teams":["LAC","HOU","PHI","WAS","ATL","MIL","SAS"],"careerHighPoints":53},{"id":"sf155","name":"Bill Walton","positions":["C"],"teams":["POR","LAC","BOS"],"careerHighPoints":36},{"id":"sf156","name":"Bill Russell","positions":["C"],"teams":["BOS"],"careerHighPoints":37},{"id":"sf157","name":"Wilt Chamberlain","positions":["C"],"teams":["GSW","PHI","LAL"],"careerHighPoints":100},{"id":"sf158","name":"Willis Reed","positions":["C","PF"],"teams":["NYK"],"careerHighPoints":53},{"id":"sf159","name":"Wes Unseld","positions":["C"],"teams":["WAS"],"careerHighPoints":30},{"id":"sf160","name":"Robert Parish","positions":["C"],"teams":["GSW","BOS","NOP","CHI"],"careerHighPoints":40},{"id":"sf161","name":"Artis Gilmore","positions":["C"],"teams":["CHI","SAS","BOS"],"careerHighPoints":42},{"id":"sf162","name":"Bob Lanier","positions":["C"],"teams":["DET","MIL"],"careerHighPoints":48},{"id":"sf163","name":"Dikembe Mutombo","positions":["C"],"teams":["DEN","ATL","PHI","BRK","NYK","HOU"],"careerHighPoints":39},{"id":"sf164","name":"Vlade Divac","positions":["C"],"teams":["LAL","NOP","SAC"],"careerHighPoints":34},{"id":"sf165","name":"Arvydas Sabonis","positions":["C"],"teams":["POR"],"careerHighPoints":33},{"id":"sf166","name":"Marc Gasol","positions":["C"],"teams":["MEM","TOR","LAL"],"careerHighPoints":42},{"id":"sf167","name":"Brook Lopez","positions":["C"],"teams":["BRK","MIL","LAC"],"careerHighPoints":39},{"id":"sf168","name":"Al Jefferson","positions":["C","PF"],"teams":["BOS","MIN","UTA","CHA","IND"],"careerHighPoints":40},{"id":"sf169","name":"Andre Drummond","positions":["C"],"teams":["DET","CLE","LAL","PHI","BRK","CHI","NYK"],"careerHighPoints":33},{"id":"sf170","name":"DeAndre Jordan","positions":["C"],"teams":["LAC","DAL","NYK","BRK","LAL","PHI","DEN","NOP"],"careerHighPoints":30},{"id":"sf171","name":"Nikola Vucevic","positions":["C"],"teams":["PHI","ORL","CHI"],"careerHighPoints":43},{"id":"sf172","name":"Deandre Ayton","positions":["C"],"teams":["PHO","POR","LAL"],"careerHighPoints":35},{"id":"sf173","name":"Karl-Anthony Towns","positions":["C","PF"],"teams":["MIN","NYK"],"careerHighPoints":62},{"id":"sf174","name":"Victor Wembanyama","positions":["C"],"teams":["SAS"],"careerHighPoints":50},{"id":"sf175","name":"Jusuf Nurkic","positions":["C"],"teams":["DEN","POR","PHO","CHA","UTA"],"careerHighPoints":33},{"id":"sf176","name":"Clint Capela","positions":["C"],"teams":["HOU","ATL"],"careerHighPoints":31},{"id":"sf177","name":"Myles Turner","positions":["C"],"teams":["IND","MIL"],"careerHighPoints":40},{"id":"sf178","name":"John Collins","positions":["PF","C"],"teams":["ATL","UTA","LAC","DET"],"careerHighPoints":38},{"id":"sf179","name":"Christian Wood","positions":["PF","C"],"teams":["PHI","CHA","MIL","NOP","DET","HOU","DAL","LAL"],"careerHighPoints":39},{"id":"sf180","name":"Marcin Gortat","positions":["C"],"teams":["ORL","PHO","WAS","LAC"],"careerHighPoints":31},{"id":"sf181","name":"Ben Gordon","positions":["SG"],"teams":["CHI","DET","CHA","ORL"],"careerHighPoints":48},{"id":"sf182","name":"Steve Smith","positions":["SG"],"teams":["MIA","ATL","POR","SAS","NOP","CHA"],"careerHighPoints":41},{"id":"sf183","name":"Jason Terry","positions":["PG","SG"],"teams":["ATL","DAL","BOS","BRK","HOU","MIL"],"careerHighPoints":46},{"id":"sf184","name":"World B. Free","positions":["SG","PG"],"teams":["PHI","LAC","GSW","CLE","HOU"],"careerHighPoints":49},{"id":"sf185","name":"Michael Redd","positions":["SG"],"teams":["MIL","PHO"],"careerHighPoints":57},{"id":"sf186","name":"Dennis Johnson","positions":["PG","SG"],"teams":["OKC","PHO","BOS"],"careerHighPoints":39},{"id":"sf187","name":"Maurice Cheeks","positions":["PG"],"teams":["PHI","SAS","NYK","ATL","BRK"],"careerHighPoints":32},{"id":"sf188","name":"Sidney Moncrief","positions":["SG","PG"],"teams":["MIL","ATL"],"careerHighPoints":43},{"id":"sf189","name":"Alvin Robertson","positions":["SG"],"teams":["SAS","MIL","DET","TOR"],"careerHighPoints":41},{"id":"sf190","name":"Clyde Drexler","positions":["SG","SF"],"teams":["POR","HOU"],"careerHighPoints":50},{"id":"sf191","name":"Walt Frazier","positions":["PG"],"teams":["NYK","CLE"],"careerHighPoints":44},{"id":"sf192","name":"Earl Monroe","positions":["SG","PG"],"teams":["WAS","NYK"],"careerHighPoints":56},{"id":"sf193","name":"Nate Thurmond","positions":["C","PF"],"teams":["GSW","CHI","CLE"],"careerHighPoints":43},{"id":"sf194","name":"Jack Sikma","positions":["C","PF"],"teams":["OKC","MIL"],"careerHighPoints":39},{"id":"sf195","name":"Dave Cowens","positions":["C","PF"],"teams":["BOS","MIL"],"careerHighPoints":39},{"id":"sf196","name":"Bobby Jones","positions":["PF"],"teams":["DEN","PHI"],"careerHighPoints":33},{"id":"sf197","name":"Truck Robinson","positions":["PF"],"teams":["WAS","ATL","UTA","PHO","NYK"],"careerHighPoints":51}];
+
+  // Defensive load: drop any record missing a required field instead of
+  // ever inventing a value or letting a bad record crash the game.
+  var SF_POSITIONS = ["PG","SG","SF","PF","C"];
+  var SF_PLAYERS = SF_PLAYERS_RAW.filter(function(p){
+    return p && p.id && p.name &&
+      Array.isArray(p.positions) && p.positions.length > 0 &&
+      p.positions.every(function(pos){ return SF_POSITIONS.indexOf(pos) !== -1; }) &&
+      Array.isArray(p.teams) && p.teams.length > 0 &&
+      typeof p.careerHighPoints === "number" && isFinite(p.careerHighPoints) && p.careerHighPoints > 0;
+  });
+  if(SF_PLAYERS.length !== SF_PLAYERS_RAW.length && window.console){
+    console.warn("Starting Five: dropped " + (SF_PLAYERS_RAW.length - SF_PLAYERS.length) + " invalid/incomplete player record(s) from SF_PLAYERS_RAW.");
+  }
+
+  // Generic category descriptor: the whole engine below (eligibility,
+  // solver, scoring) reads only category.statKey / category.objective,
+  // so adding careerHighAssists, careerPpg, allStarAppearances, etc.
+  // later is just another entry in this array plus a category picker in
+  // the UI — no engine changes required.
+  var SF_CATEGORIES = [
+    { id:"career_high_points", label:"Career High Points", statKey:"careerHighPoints", objective:"maximize" }
+  ];
+
+  function sfFranchiseName(code){
+    var f = SF_FRANCHISES.filter(function(x){ return x.code === code; })[0];
+    return f ? f.name : code;
+  }
+  function sfEligible(player, franchiseCode, position){
+    return player.teams.indexOf(franchiseCode) !== -1 && player.positions.indexOf(position) !== -1;
+  }
+  function sfSampleDistinct(arr, n){
+    var copy = arr.slice(), out = [];
+    for(var i=0;i<n && copy.length;i++){
+      var j = Math.floor(Math.random()*copy.length);
+      out.push(copy.splice(j,1)[0]);
+    }
+    return out;
+  }
+
+  // Exhaustive backtracking optimizer — reusable for any gameCategory.
+  // Given an ordered list of 5 franchise codes, the player pool, and a
+  // category descriptor, returns the highest- (or lowest-, if
+  // objective:"minimize") scoring complete assignment of franchise ->
+  // (position, player) satisfying: each franchise used once, each of
+  // the 5 positions filled exactly once, no player reused, and every
+  // (player, franchise, position) combination genuinely eligible.
+  // Returns null when no complete assignment exists at all — used both
+  // to test whether a random 5-franchise draw is playable at all, and
+  // to compute the post-game "perfect score" for the SAME draw.
+  //
+  // Deliberately not greedy: greedily locking in each franchise's best
+  // player as it's drawn can strand a later franchise whose only strong
+  // option needs the same position another franchise's best player just
+  // took (see sf_test.js's "PF-blocking trap" test) — this explores
+  // every valid complete assignment instead.
+  //
+  // With a 197-player roster, some franchises (Lakers, Celtics, Knicks,
+  // Clippers...) have 30+ eligible players, so a naive unpruned search
+  // over 5 franchises can blow up into millions of branches. Two
+  // performance-only additions keep this exact but fast: solving the
+  // most-constrained franchise first (fewest eligible pairs), and
+  // branch-and-bound pruning against a loose upper bound on what the
+  // remaining franchises could still contribute. Neither changes the
+  // answer — they only skip branches that provably cannot win.
+  function sfSolveOptimal(franchiseCodes, players, category){
+    var maximize = category.objective !== "minimize";
+    var best = null;
+    var usedPlayers = {}, usedPositions = {}, current = [];
+
+    var byFranchise = franchiseCodes.map(function(code){
+      var pairs = [];
+      for(var i=0;i<players.length;i++){
+        var p = players[i];
+        for(var j=0;j<SF_POSITIONS.length;j++){
+          var pos = SF_POSITIONS[j];
+          if(sfEligible(p, code, pos)) pairs.push({ position:pos, player:p, value:p[category.statKey] });
+        }
+      }
+      return pairs;
+    });
+
+    var order = franchiseCodes.map(function(code, i){ return i; })
+      .sort(function(a,b){ return byFranchise[a].length - byFranchise[b].length; });
+    var orderedFranchises = order.map(function(i){ return franchiseCodes[i]; });
+    var orderedPairs = order.map(function(i){ return byFranchise[i]; });
+
+    var suffixBestSum = new Array(orderedPairs.length + 1);
+    suffixBestSum[orderedPairs.length] = 0;
+    for(var s = orderedPairs.length - 1; s >= 0; s--){
+      var bestHere = 0;
+      for(var m = 0; m < orderedPairs[s].length; m++){
+        var v = orderedPairs[s][m].value;
+        if(m === 0) bestHere = v;
+        else if(maximize ? v > bestHere : v < bestHere) bestHere = v;
+      }
+      suffixBestSum[s] = suffixBestSum[s+1] + bestHere;
+    }
+
+    function recurse(idx, total){
+      if(idx === orderedPairs.length){
+        if(best === null || (maximize ? total > best.total : total < best.total)){
+          best = { total: total, assignments: current.slice() };
+        }
+        return;
+      }
+      if(best !== null){
+        var optimisticBest = maximize ? total + suffixBestSum[idx] : total - suffixBestSum[idx];
+        if(maximize ? optimisticBest <= best.total : optimisticBest >= best.total) return; // can't win — prune
+      }
+      var franchise = orderedFranchises[idx];
+      var pairs = orderedPairs[idx];
+      for(var k=0;k<pairs.length;k++){
+        var pos = pairs[k].position, p = pairs[k].player;
+        if(usedPositions[pos] || usedPlayers[p.id]) continue;
+        usedPositions[pos] = true; usedPlayers[p.id] = true;
+        current.push({ franchise: franchise, position: pos, player: p, value: pairs[k].value });
+        recurse(idx+1, total + pairs[k].value);
+        current.pop();
+        usedPositions[pos] = false; usedPlayers[p.id] = false;
+      }
+    }
+    recurse(0, 0);
+    return best;
+  }
+  function sfIsSolvable(franchiseCodes, players, category){
+    return sfSolveOptimal(franchiseCodes, players, category) !== null;
+  }
+  // Regenerates the draw until it's solvable (mandatory pre-game check
+  // per spec). With 197 players this resolves on the first attempt
+  // essentially every time, but the retry loop plus this hardcoded
+  // fallback combo (independently verified solvable) guarantee the game
+  // can never hard-lock even if the roster is edited later and made
+  // sparser.
+  var SF_FALLBACK_DRAW = ["LAL","BOS","CHI","SAS","HOU"];
+  function sfDrawFranchises(category){
+    var pool = SF_FRANCHISES.map(function(f){ return f.code; });
+    for(var attempt=0; attempt<200; attempt++){
+      var codes = sfSampleDistinct(pool, 5);
+      if(sfIsSolvable(codes, SF_PLAYERS, category)) return codes;
+    }
+    return SF_FALLBACK_DRAW.slice();
+  }
+  function sfAccuracy(userTotal, optimalTotal){
+    if(!optimalTotal) return 0;
+    return Math.max(0, Math.min(100, (userTotal/optimalTotal)*100));
+  }
+  function sfRatingTier(accuracy){
+    if(accuracy >= 100) return "PERFECT";
+    if(accuracy >= 95) return "ELITE";
+    if(accuracy >= 90) return "GREAT";
+    if(accuracy >= 80) return "GOOD";
+    return "KEEP GRINDING";
+  }
+
+  // ---------------------------------------------------------------
+  // Starting Five: state machine (SETUP / PLAYING / RESULTS) + render.
+  //
+  // Interaction model: each round shows one franchise. The 5 lineup
+  // slots double as the picker entry point — tapping an open slot that
+  // still has at least one eligible, unused player opens a search
+  // scoped to that exact position, and tapping a player in the results
+  // locks them in immediately (no separate confirm step, matching how
+  // the rest of this site keeps interactions to a single tap/click).
+  // ---------------------------------------------------------------
+  var sf = null; // null until a game is started; startingFive() creates it fresh every time
+
+  function sfNewGameState(){
+    var category = SF_CATEGORIES[0];
+    return {
+      phase: "PLAYING",
+      category: category,
+      franchises: sfDrawFranchises(category),
+      round: 0, // index into franchises
+      lineup: {}, // position -> { player, franchise, value }
+      usedPlayerIds: {},
+      activeSearchPosition: null,
+      optimal: null
+    };
+  }
+
+  function sfOpenPositions(){
+    return SF_POSITIONS.filter(function(p){ return !sf.lineup.hasOwnProperty(p); });
+  }
+  function sfCurrentFranchise(){
+    return sf.franchises[sf.round];
+  }
+  // Only positions worth showing as tappable: still open AND at least
+  // one eligible, not-yet-used player exists for them at this franchise.
+  function sfTappablePositions(){
+    var franchise = sfCurrentFranchise();
+    return sfOpenPositions().filter(function(pos){
+      return SF_PLAYERS.some(function(p){ return !sf.usedPlayerIds[p.id] && sfEligible(p, franchise, pos); });
+    });
+  }
+  function sfLineupTotal(){
+    var total = 0;
+    SF_POSITIONS.forEach(function(pos){ if(sf.lineup[pos]) total += sf.lineup[pos].value; });
+    return total;
+  }
+
+  function startingFive(){
+    sf = sfNewGameState();
+    showScreen("screen-sf-play");
+    sfBeginRound();
+  }
+
+  function sfRenderLineup(containerId, lineupSource, opts){
+    opts = opts || {};
+    var tappable = opts.tappable || [];
+    var el = document.getElementById(containerId);
+    el.innerHTML = "";
+    SF_POSITIONS.forEach(function(pos){
+      var filled = lineupSource[pos];
+      var isTappable = !filled && tappable.indexOf(pos) !== -1;
+      var row = document.createElement("button");
+      row.type = "button";
+      row.disabled = !isTappable;
+      row.className = "sf-slot" + (filled ? " colored" : " empty") + (isTappable ? " tappable" : "");
+      var logoHtml = filled ? sfTeamBadgeHtml(filled.franchise, "sf-slot-logo") : "";
+      var nameHtml = filled
+        ? '<div class="sf-slotname">'+filled.player.name+'</div>'
+        : '<div class="sf-slotname placeholder">'+(isTappable ? "Open — tap to fill" : "Open")+'</div>';
+      var valHtml = filled ? '<div class="sf-slotval tabular">'+filled.value+'</div>' : "";
+      row.innerHTML = logoHtml + '<div class="sf-pos">'+pos+'</div>' + nameHtml + valHtml;
+      if(filled){
+        var teamColor = sfTeamColor(filled.franchise);
+        row.style.background = teamColor;
+        row.style.color = sfContrastText(teamColor);
+      }
+      if(isTappable){
+        row.addEventListener("click", function(p){ return function(){ sfOpenSlotSearch(p); }; }(pos));
+      }
+      el.appendChild(row);
+    });
+  }
+
+  function sfRenderRound(){
+    document.getElementById("sf-round").textContent = (sf.round+1) + "/5";
+    document.getElementById("sf-total").textContent = sfLineupTotal();
+    var franchise = sfCurrentFranchise();
+    document.getElementById("sf-franchise").textContent = sfFranchiseName(franchise);
+
+    sf.activeSearchPosition = null;
+    document.getElementById("sf-picker").hidden = true;
+    document.getElementById("sf-next").hidden = true;
+    document.getElementById("sf-deadend").hidden = true;
+
+    var tappable = sfTappablePositions();
+    if(tappable.length === 0){
+      // Edge case: nobody eligible is left for any open position at this
+      // franchise (everyone who could fill one was already used earlier
+      // — the classic risk of a suboptimal pick, not a bug). Rather than
+      // soft-lock the game, this round is auto-skipped: every open
+      // position just stays open for a later franchise to try.
+      document.getElementById("sf-hint").hidden = false;
+      document.getElementById("sf-hint").textContent = "No eligible players remain for any open position at this franchise.";
+      document.getElementById("sf-tap-hint").hidden = true;
+      sfRenderLineup("sf-lineup", sf.lineup, {});
+      var openPos = sfOpenPositions();
+      var msg = document.getElementById("sf-deadend");
+      msg.hidden = false;
+      msg.textContent = "No eligible players remain for the " + sfFranchiseName(franchise) + "'s open position(s) (" + openPos.join(", ") + ") — this round is skipped.";
+      document.getElementById("sf-next").hidden = false;
+      document.getElementById("sf-continue").textContent = (sf.round === 4) ? "See Results" : "Next Franchise";
+    } else {
+      // The tap-to-pick flow is self-explanatory after the first round,
+      // so the banner just shows the franchise name with no filler
+      // instruction line underneath.
+      document.getElementById("sf-hint").hidden = true;
+      document.getElementById("sf-tap-hint").hidden = false;
+      sfRenderLineup("sf-lineup", sf.lineup, { tappable: tappable });
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Franchise reveal: a short slot-machine-style spin that plays at the
+  // start of every round, landing on the franchise sfDrawFranchises()
+  // already picked for this round (the draw itself is unaffected --
+  // this is purely a reveal animation, not where the randomness comes
+  // from). Tapping the strip skips straight to the landed state, which
+  // both gives impatient players an out and keeps this fully
+  // synchronous/testable (no dependency on real timers or transitionend
+  // actually firing in a given environment).
+  // ---------------------------------------------------------------
+  var SF_REVEAL_ITEM_W = 70; // must match .sf-reveal-item's CSS width -- the scroll-distance math below is derived from it
+  var SF_REVEAL_LOOPS = 5;
+  var SF_REVEAL_SPIN_MS = 2200;
+  var SF_REVEAL_PAUSE_MS = 550;
+
+  function sfBeginRound(){
+    document.getElementById("sf-round").textContent = (sf.round+1) + "/5";
+    document.getElementById("sf-total").textContent = sfLineupTotal();
+    document.getElementById("sf-franchise").textContent = "?";
+    document.getElementById("sf-hint").hidden = true;
+    sf.activeSearchPosition = null;
+    document.getElementById("sf-picker").hidden = true;
+    document.getElementById("sf-next").hidden = true;
+    document.getElementById("sf-deadend").hidden = true;
+    document.getElementById("sf-tap-hint").hidden = true;
+    sfRenderLineup("sf-lineup", sf.lineup, {});
+    sfStartReveal(sfCurrentFranchise());
+  }
+
+  function sfStartReveal(targetCode){
+    var reveal = document.getElementById("sf-reveal");
+    var track = document.getElementById("sf-reveal-track");
+    var codes = SF_FRANCHISES.map(function(f){ return f.code; });
+    var items = [];
+    for(var i=0;i<SF_REVEAL_LOOPS;i++){
+      items = items.concat(sfSampleDistinct(codes, codes.length));
+    }
+    items.push(targetCode);
+    var landingIndex = items.length - 1;
+
+    track.style.transition = "none";
+    track.style.transform = "translateX(0px)";
+    track.style.width = (items.length * SF_REVEAL_ITEM_W) + "px";
+    track.innerHTML = items.map(function(code){
+      return '<div class="sf-reveal-item">' + sfTeamBadgeHtml(code, "") + '</div>';
+    }).join("");
+
+    reveal.hidden = false;
+    reveal.classList.remove("done");
+    reveal.classList.remove("settled");
+    sf.revealDone = false;
+    sf.revealLandingIndex = landingIndex;
+
+    var wrap = document.getElementById("sf-reveal-wrap");
+    var wrapWidth = wrap.clientWidth || (SF_REVEAL_ITEM_W * 5);
+    var offset = landingIndex * SF_REVEAL_ITEM_W + SF_REVEAL_ITEM_W / 2 - wrapWidth / 2;
+    sf.revealOffset = offset;
+
+    // Two rAFs: the first lets the browser commit the "transition:none,
+    // transform:0" reset above before the second one turns transitions
+    // back on and sets the real target -- otherwise the browser can
+    // coalesce both style writes into one frame and skip the animation.
+    if(window.requestAnimationFrame){
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          track.style.transition = "transform " + SF_REVEAL_SPIN_MS + "ms cubic-bezier(.1,.7,.15,1)";
+          track.style.transform = "translateX(-" + offset + "px)";
+        });
+      });
+    } else {
+      track.style.transform = "translateX(-" + offset + "px)";
+    }
+
+    sf.revealTimer = window.setTimeout(function(){ sfLandReveal(false); }, SF_REVEAL_SPIN_MS);
+  }
+
+  // skipped=true (user tapped the strip) resolves instantly with no
+  // extra pause; skipped=false (the spin finished on its own) holds on
+  // the enlarged landed logo for a beat before handing off to the round.
+  function sfLandReveal(skipped){
+    if(sf.revealDone) return;
+    sf.revealDone = true;
+    if(sf.revealTimer){ clearTimeout(sf.revealTimer); sf.revealTimer = null; }
+
+    var track = document.getElementById("sf-reveal-track");
+    track.style.transition = "none";
+    track.style.transform = "translateX(-" + sf.revealOffset + "px)";
+
+    var items = track.children;
+    for(var i=0;i<items.length;i++){
+      if(i === sf.revealLandingIndex) items[i].classList.add("landed");
+      else items[i].classList.add("faded");
+    }
+    document.getElementById("sf-reveal").classList.add("done");
+
+    if(skipped){
+      sfFinishReveal();
+    } else {
+      window.setTimeout(sfFinishReveal, SF_REVEAL_PAUSE_MS);
+    }
+  }
+
+  // Instead of hiding the reveal strip, collapse it down to just the
+  // winning team's logo (bigger), which stays put for the rest of the round.
+  function sfSettleReveal(){
+    var reveal = document.getElementById("sf-reveal");
+    var track = document.getElementById("sf-reveal-track");
+    var landed = track.children[sf.revealLandingIndex];
+    track.innerHTML = "";
+    if(landed){
+      landed.classList.remove("faded");
+      track.appendChild(landed);
+    }
+    track.style.transition = "none";
+    track.style.width = "auto";
+    track.style.transform = "none";
+    reveal.classList.remove("done");
+    reveal.classList.add("settled");
+    reveal.hidden = false;
+  }
+
+  function sfFinishReveal(){
+    sfSettleReveal();
+    sfRenderRound();
+  }
+
+  function sfOpenSlotSearch(position){
+    sf.activeSearchPosition = position;
+    document.getElementById("sf-tap-hint").hidden = true;
+    document.getElementById("sf-picker").hidden = false;
+    document.getElementById("sf-picker-title").textContent = "Pick a " + position + " — " + sfFranchiseName(sfCurrentFranchise());
+    var search = document.getElementById("sf-search");
+    search.value = "";
+    sfRenderSearchResults("");
+    search.focus();
+  }
+
+  function sfClosePicker(){
+    sf.activeSearchPosition = null;
+    document.getElementById("sf-picker").hidden = true;
+    document.getElementById("sf-tap-hint").hidden = false;
+  }
+
+  function sfRenderSearchResults(query){
+    var franchise = sfCurrentFranchise();
+    var position = sf.activeSearchPosition;
+    if(!position) return;
+    var q = query.trim().toLowerCase();
+    var matches = SF_PLAYERS.filter(function(p){
+      if(sf.usedPlayerIds[p.id]) return false;
+      if(!sfEligible(p, franchise, position)) return false;
+      if(q && p.name.toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+
+    var box = document.getElementById("sf-results");
+    var noResults = document.getElementById("sf-noresults");
+    box.innerHTML = "";
+    if(matches.length === 0){
+      noResults.hidden = false;
+      noResults.textContent = query
+        ? "No eligible " + position + "s for the " + sfFranchiseName(franchise) + " match “" + query + "”."
+        : "No eligible " + position + "s remain for the " + sfFranchiseName(franchise) + ".";
+      return;
+    }
+    noResults.hidden = true;
+    matches.slice(0, 60).forEach(function(p){
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "sf-result-row";
+      var teamsLabel = p.teams.length > 4 ? p.teams.slice(0,4).join(" / ") + " +" + (p.teams.length-4) : p.teams.join(" / ");
+      row.innerHTML =
+        '<div class="sf-rname">'+p.name+'</div>' +
+        '<div class="sf-rteams">'+teamsLabel+'</div>';
+      row.addEventListener("click", function(){ sfPickAndLock(p); });
+      box.appendChild(row);
+    });
+  }
+
+  function sfPickAndLock(player){
+    var position = sf.activeSearchPosition;
+    if(!position) return;
+    var franchise = sfCurrentFranchise();
+    var value = player[sf.category.statKey];
+
+    sf.lineup[position] = { player: player, franchise: franchise, value: value };
+    sf.usedPlayerIds[player.id] = true;
+    sf.activeSearchPosition = null;
+
+    document.getElementById("sf-picker").hidden = true;
+    document.getElementById("sf-tap-hint").hidden = true;
+    sfRenderLineup("sf-lineup", sf.lineup, {});
+    document.getElementById("sf-total").textContent = sfLineupTotal();
+
+    var rows = document.querySelectorAll("#sf-lineup .sf-slot");
+    var idx = SF_POSITIONS.indexOf(position);
+    if(rows[idx]) rows[idx].classList.add("justfilled");
+
+    document.getElementById("sf-next").hidden = false;
+    document.getElementById("sf-continue").textContent = (sf.round === 4) ? "See Results" : "Next Franchise";
+  }
+
+  function sfContinue(){
+    if(sf.round === 4){
+      sfFinishGame();
+    } else {
+      sf.round++;
+      sfBeginRound();
+    }
+  }
+
+  function sfFinishGame(){
+    sf.phase = "RESULTS";
+    sf.optimal = sfSolveOptimal(sf.franchises, SF_PLAYERS, sf.category);
+    var userTotal = sfLineupTotal();
+    // sf.optimal should never be null here: the draw was verified
+    // solvable before the game started, so a complete valid assignment
+    // is guaranteed to exist for it regardless of what the user picked.
+    var optimalTotal = sf.optimal ? sf.optimal.total : userTotal;
+    var accuracy = sfAccuracy(userTotal, optimalTotal);
+    var tier = sfRatingTier(accuracy);
+
+    document.getElementById("sf-accuracy").textContent = Math.round(accuracy * 10) / 10 + "%";
+    document.getElementById("sf-rating").textContent = tier === "PERFECT" ? "Perfect" : tier.charAt(0) + tier.slice(1).toLowerCase();
+    document.getElementById("sf-perfect-badge").hidden = accuracy < 100;
+    document.getElementById("sf-your-score").textContent = userTotal;
+    document.getElementById("sf-perfect-score").textContent = optimalTotal;
+
+    sfRenderLineup("sf-your-lineup", sf.lineup, {});
+    var optimalLineup = {};
+    if(sf.optimal){
+      sf.optimal.assignments.forEach(function(a){
+        optimalLineup[a.position] = { player: a.player, franchise: a.franchise, value: a.value };
+      });
+    }
+    sfRenderLineup("sf-optimal-lineup", optimalLineup, {});
+
+    showScreen("screen-sf-results");
+  }
+
+  document.querySelectorAll(".tile[data-game]").forEach(function(btn){
+    var game = btn.getAttribute("data-game");
+    if(game === "startingfive"){
+      btn.addEventListener("click", startingFive);
+    }
+  });
+  document.getElementById("sf-back").addEventListener("click", function(){ showScreen("screen-hub"); });
+  document.getElementById("sf-hub").addEventListener("click", function(){ showScreen("screen-hub"); });
+  document.getElementById("sf-again").addEventListener("click", startingFive);
+  document.getElementById("sf-picker-cancel").addEventListener("click", sfClosePicker);
+  document.getElementById("sf-continue").addEventListener("click", sfContinue);
+  document.getElementById("sf-reveal").addEventListener("click", function(){ sfLandReveal(true); });
+  document.getElementById("sf-search").addEventListener("input", function(e){ sfRenderSearchResults(e.target.value); });
+
+  // ---------------------------------------------------------------
+  // player photos: fetched from players-photos.json (shipped alongside
+  // this page). Falls back to an initials badge for everyone else,
+  // or if the fetch fails for any reason.
+  // ---------------------------------------------------------------
+  var PHOTOS = {};
+  fetch("players-photos.json").then(function(r){ return r.json(); }).then(function(data){
+    PHOTOS = data || {};
+    paintAvatars();
+  }).catch(function(){ /* initials badges only — fine */ });
+
+  function initials(name){
+    var parts = name.replace(/[^A-Za-z' -]/g, "").split(/[\s-]+/).filter(Boolean);
+    if(parts.length === 0) return "??";
+    if(parts.length === 1) return parts[0].slice(0,2).toUpperCase();
+    return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+  }
+
+  function paintAvatarEl(el, player){
+    var pname = player.n || player.name; // PLAYERS/CURRENT_PLAYERS use "n", SF_PLAYERS uses "name"
+    var url = player.photoId && PHOTOS[player.photoId];
+    if(url){
+      el.innerHTML = '<img src="'+url+'" alt="'+pname+'">';
+    } else {
+      el.innerHTML = '<span class="initials">'+initials(pname)+'</span>';
+    }
+  }
+
+  function paintAvatars(){
+    if(state.a) paintAvatarEl(document.getElementById("ml-avatar-0"), state.a);
+    if(state.b) paintAvatarEl(document.getElementById("ml-avatar-1"), state.b);
+  }
+
+  // ---------------------------------------------------------------
+  // small storage helper (per-viewer convenience only)
+  // ---------------------------------------------------------------
+  function loadBest(){
+    try{
+      var v = parseInt(localStorage.getItem("nba-iq-ml-best"), 10);
+      return isNaN(v) ? 0 : v;
+    }catch(e){ return 0; }
+  }
+  function saveBest(v){
+    try{ localStorage.setItem("nba-iq-ml-best", String(v)); }catch(e){}
+  }
+  function loadMode(){
+    try{
+      var m = localStorage.getItem("nba-iq-mode");
+      return (m === "alltime") ? "alltime" : "current";
+    }catch(e){ return "current"; }
+  }
+  function saveMode(m){
+    try{ localStorage.setItem("nba-iq-mode", m); }catch(e){}
+  }
+
+  var state = { best: loadBest(), streak: 0, a: null, b: null, catKey: null, lastCatKey: null, locked: false, mode: loadMode() };
+
+  document.getElementById("ml-best").textContent = state.best;
+
+  // ---------------------------------------------------------------
+  // Current vs. All-Time mode: filters the player pool and swaps the
+  // whole color theme (bright cream/orange <-> black &amp; gold).
+  // ---------------------------------------------------------------
+  function applyMode(){
+    var alltime = state.mode === "alltime";
+    document.body.setAttribute("data-mode", state.mode);
+    var sw = document.getElementById("mode-switch");
+    sw.classList.toggle("on", alltime);
+    sw.setAttribute("aria-checked", alltime ? "true" : "false");
+    document.querySelector(".side-current").classList.toggle("active", !alltime);
+    document.querySelector(".side-alltime").classList.toggle("active", alltime);
+  }
+
+  document.getElementById("mode-switch").addEventListener("click", function(){
+    state.mode = (state.mode === "alltime") ? "current" : "alltime";
+    state.lastCatKey = null; // the two modes don't share a category set
+    saveMode(state.mode);
+    applyMode();
+  });
+  document.getElementById("mode-switch").addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); this.click(); }
+  });
+
+  applyMode();
+
+  // ---------------------------------------------------------------
+  // screen switching
+  // ---------------------------------------------------------------
+  function showScreen(id){
+    var screens = document.querySelectorAll(".screen");
+    for(var i=0;i<screens.length;i++){ screens[i].classList.remove("active"); }
+    document.getElementById(id).classList.add("active");
+    document.body.classList.toggle("playing", id === "screen-ml" || id === "screen-sf-play");
+  }
+
+  document.querySelectorAll(".tile[data-game]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var game = btn.getAttribute("data-game");
+      if(game === "moreless"){ startGame(); }
+    });
+  });
+  document.getElementById("ml-back").addEventListener("click", function(){ showScreen("screen-hub"); });
+  document.getElementById("over-hub").addEventListener("click", function(){ showScreen("screen-hub"); });
+  document.getElementById("over-again").addEventListener("click", function(){ startGame(); });
+
+  // ---------------------------------------------------------------
+  // "Who's Got More" game logic — fresh pair + fresh category each
+  // round, drawn from whichever pool the mode switch selects. As the
+  // streak grows, matchups are biased toward closer stat values (still
+  // randomized among whichever players qualify) so the game gets
+  // harder the longer a run goes.
+  // ---------------------------------------------------------------
+  function getPool(){
+    return state.mode === "alltime" ? PLAYERS : CURRENT_PLAYERS;
+  }
+  function getCategories(){
+    return state.mode === "alltime" ? ALLTIME_CATEGORIES : CURRENT_CATEGORIES;
+  }
+  function metaText(player){
+    return player.era ? player.era : (player.team + " • " + player.pos);
+  }
+
+  function maxNormDiff(streak){
+    if(streak < 3) return 1.0;
+    if(streak < 6) return 0.5;
+    if(streak < 10) return 0.28;
+    if(streak < 15) return 0.16;
+    return 0.09;
+  }
+
+  function newRound(){
+    var pool = getPool();
+    var baseThreshold = maxNormDiff(state.streak);
+    var a, cat, candidates = [];
+
+    var categories = getCategories();
+    for(var attempt = 0; attempt < 80 && candidates.length === 0; attempt++){
+      a = pool[Math.floor(Math.random()*pool.length)];
+      var catOptions = categories.filter(function(c){
+        return a[c.key] !== null && a[c.key] !== undefined && c.key !== state.lastCatKey;
+      });
+      if(catOptions.length === 0){
+        catOptions = categories.filter(function(c){ return a[c.key] !== null && a[c.key] !== undefined; });
+      }
+      if(catOptions.length === 0) continue;
+      cat = catOptions[Math.floor(Math.random()*catOptions.length)];
+
+      var range = cat.max - cat.min;
+      var threshold = Math.min(1, baseThreshold + attempt * 0.03);
+      candidates = pool.filter(function(p){
+        if(p === a) return false;
+        if(p[cat.key] === null || p[cat.key] === undefined) return false;
+        if(p[cat.key] === a[cat.key]) return false;
+        return Math.abs(p[cat.key] - a[cat.key]) / range <= threshold;
+      });
+    }
+
+    state.a = a;
+    state.b = candidates[Math.floor(Math.random()*candidates.length)];
+    state.catKey = cat.key;
+    state.lastCatKey = cat.key;
+    state.locked = false;
+    renderRound();
+  }
+
+  function startGame(){
+    state.streak = 0;
+    document.getElementById("ml-streak").textContent = 0;
+    newRound();
+    showScreen("screen-ml");
+  }
+
+  function resetOptionVisual(idx){
+    var opt = document.getElementById("ml-opt-"+idx);
+    opt.classList.remove("revealed","correct","wrong");
+    document.getElementById("ml-value-"+idx).textContent = "";
+    document.getElementById("ml-fill-"+idx).style.height = "0%";
+  }
+
+  function renderRound(){
+    var cat = getCategories().filter(function(c){ return c.key === state.catKey; })[0];
+    document.getElementById("ml-category").textContent = cat.label;
+    document.getElementById("ml-hint").textContent = cat.hint;
+
+    document.getElementById("ml-era-0").textContent = metaText(state.a);
+    document.getElementById("ml-name-0").textContent = state.a.n;
+    document.getElementById("ml-era-1").textContent = metaText(state.b);
+    document.getElementById("ml-name-1").textContent = state.b.n;
+
+    paintAvatars();
+    resetOptionVisual(0);
+    resetOptionVisual(1);
+
+    document.getElementById("ml-opt-0").classList.remove("locked");
+    document.getElementById("ml-opt-1").classList.remove("locked");
+    document.getElementById("ml-next").hidden = true;
+
+    document.getElementById("ml-streak").textContent = state.streak;
+    document.getElementById("ml-best").textContent = state.best;
+  }
+
+  function countUp(el, target, fmt, ms){
+    var start = performance.now();
+    function frame(now){
+      var t = Math.min(1, (now - start) / ms);
+      var eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = fmt(target * eased);
+      if(t < 1) requestAnimationFrame(frame);
+      else el.textContent = fmt(target);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function reveal(idx, player, cat, isMore, wasPicked){
+    var opt = document.getElementById("ml-opt-"+idx);
+    var fill = document.getElementById("ml-fill-"+idx);
+    var valEl = document.getElementById("ml-value-"+idx);
+    var tagEl = document.getElementById("ml-tag-"+idx);
+    var raw = player[cat.key];
+    var pct = Math.max(6, Math.min(100, ((raw - cat.min) / (cat.max - cat.min)) * 100));
+
+    opt.classList.add("revealed", "locked");
+    requestAnimationFrame(function(){ fill.style.height = pct + "%"; });
+    countUp(valEl, raw, cat.fmt, cat.duration || 800);
+    tagEl.textContent = isMore ? "More" : "Less";
+
+    if(isMore){ opt.classList.add("correct"); }
+    else if(wasPicked){ opt.classList.add("wrong"); }
+  }
+
+  function handlePick(idx){
+    if(state.locked) return;
+    state.locked = true;
+
+    var cat = getCategories().filter(function(c){ return c.key === state.catKey; })[0];
+    var av = state.a[cat.key], bv = state.b[cat.key];
+    var aIsMore = av >= bv;
+    var pickedA = (idx === 0);
+    var correct = (pickedA && aIsMore) || (!pickedA && !aIsMore);
+
+    reveal(0, state.a, cat, aIsMore, pickedA);
+    reveal(1, state.b, cat, !aIsMore, !pickedA);
+
+    var settleDelay = (cat.duration || 800) + 150;
+    setTimeout(function(){
+      if(correct){
+        state.streak++;
+        if(state.streak > state.best){ state.best = state.streak; saveBest(state.best); }
+        document.getElementById("ml-streak").textContent = state.streak;
+        document.getElementById("ml-best").textContent = state.best;
+        document.getElementById("ml-next").hidden = false;
+      } else {
+        setTimeout(function(){ endRun(); }, 700);
+      }
+    }, settleDelay);
+  }
+
+  document.getElementById("ml-opt-0").addEventListener("click", function(){ handlePick(0); });
+  document.getElementById("ml-opt-1").addEventListener("click", function(){ handlePick(1); });
+  document.getElementById("ml-continue").addEventListener("click", newRound);
+
+  function endRun(){
+    document.getElementById("over-streak").textContent = state.streak;
+    document.getElementById("over-newbest").hidden = (state.streak < state.best) || state.streak === 0;
+    showScreen("screen-over");
+  }
+
+  // ---------------------------------------------------------------
+  // hot-reload support for viewers who have the page open already
+  // ---------------------------------------------------------------
+  function boot(saved){
+    if(saved && saved.best){ state.best = saved.best; document.getElementById("ml-best").textContent = state.best; }
+  }
+  if(window.claude && window.claude.hot){
+    window.claude.hot.snapshot(function(){ return { best: state.best }; });
+    window.claude.hot.ready ? window.claude.hot.ready(boot) : boot(window.claude.hot.data || {});
+  } else {
+    boot({});
+  }
+})();
+</script>
+
+</body></html>
