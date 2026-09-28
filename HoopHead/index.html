@@ -204,6 +204,12 @@
   }
   .tile:hover{ transform:translate(-2px,-2px); box-shadow:5px 5px 0 var(--shadow); }
   .tile:active{ transform:translate(0,0); box-shadow:2px 2px 0 var(--shadow); }
+  /* game icon in the top-right corner of each home-screen box */
+  .tile{ position:relative; }
+  .tile-icon{
+    position:absolute; top:14px; right:14px; width:32px; height:32px;
+    fill:var(--orange); color:var(--orange);
+  }
   .tile .num{
     font-family:'Anton', sans-serif;
     font-size:12px;
@@ -737,6 +743,119 @@
     .hg-cell.pop, .hg-cell.shake, .grid-end, .grid-count-num.bump{ animation:none; }
   }
 
+  /* ---------- 2k lineup ---------- */
+  @media (max-width:480px){ .tk-banner .hint{ display:none; } }
+  .tk-court{
+    position:relative; width:100%; max-width:420px; margin:0 auto 10px;
+    border:2px solid var(--black); border-radius:14px; overflow:hidden;
+    box-shadow:3px 3px 0 var(--shadow);
+  }
+  .tk-court-img{ display:block; width:100%; height:auto; }
+  /* a rating badge sits on its position's spot; left/top come from the data */
+  /* the badge/photo centre sits on the spot; labels hang below it */
+  .tk-spot{
+    position:absolute; transform:translate(-50%, -27px);
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  /* animate the badge, not the spot, so the spot's centring transform stays */
+  .tk-spot > *{ animation:cp-tile-in .35s cubic-bezier(.2,.8,.2,1.3) both; animation-delay:calc(var(--i) * 70ms); }
+  .tk-badge{
+    width:50px; height:50px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    border:3px solid #FFFCF5;
+    font-family:'Anton', sans-serif; font-size:24px; line-height:1;
+    box-shadow:0 2px 6px rgba(0,0,0,.45);
+  }
+  .tk-pos{
+    font-family:'Anton', sans-serif; font-size:11px; letter-spacing:.06em; color:#FFFCF5;
+    background:rgba(23,17,11,.85); border-radius:999px; padding:1px 7px;
+  }
+  .tk-name{
+    font-size:10px; font-weight:700; color:#fff; background:rgba(23,17,11,.85);
+    border-radius:6px; padding:2px 6px; max-width:84px; text-align:center; line-height:1.15;
+    animation:cp-reveal-pop .35s ease;
+  }
+  /* 2K tier colours */
+  .t-amethyst{ background:linear-gradient(160deg, #B07CF0, #5B2A86); color:#fff; }
+  .t-gold{ background:linear-gradient(160deg, #F4D675, #B8860B); color:#241a12; }
+  .t-silver{ background:linear-gradient(160deg, #EEF1F4, #97A1AC); color:#241a12; }
+  .t-bronze{ background:linear-gradient(160deg, #D89560, #8A4F2A); color:#fff; }
+  /* revealed headshot, flipping in, with the rating chip on its corner */
+  .tk-photo{
+    position:relative; width:48px; height:48px; border-radius:50%;
+    border:3px solid #FFFCF5; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.45);
+  }
+  .tk-photo img{ width:100%; height:100%; border-radius:50%; object-fit:cover; object-position:50% 15%; display:block; }
+  .tk-spot.revealed .tk-photo, .tk-spot.revealed .tk-badge{ animation:tk-flip .5s ease both; animation-delay:calc(var(--i) * 80ms); }
+  @keyframes tk-flip{ 0%{ transform:rotateY(90deg); } 100%{ transform:rotateY(0); } }
+  .tk-chip{
+    position:absolute; right:-8px; bottom:-4px; min-width:24px; height:20px; padding:0 4px;
+    border-radius:999px; border:2px solid #FFFCF5;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Anton', sans-serif; font-size:12px;
+  }
+  .tk-spot.revealed .tk-pos{ display:none; }  /* the spot shows the position; the name takes its place */
+  .tk-court.solved .tk-badge, .tk-court.solved .tk-photo{ border-color:#86b876; }
+  .tk-court.missed .tk-badge, .tk-court.missed .tk-photo{ border-color:#e08d84; }
+  /* team-colour glow + logo pop on a correct answer */
+  .tk-glow{
+    position:absolute; inset:0; pointer-events:none; opacity:0;
+    background:radial-gradient(circle at 50% 50%, var(--team, #E2611C) 0%, transparent 70%);
+    box-shadow:inset 0 0 0 6px var(--team, #E2611C);
+  }
+  .tk-glow.on{ animation:tk-glow 1.8s ease forwards; }
+  @keyframes tk-glow{ 0%{ opacity:0; } 20%{ opacity:.75; } 100%{ opacity:0; } }
+  .tk-center-logo{
+    position:absolute; left:50%; top:48%; width:96px; height:96px; transform:translate(-50%, -50%) scale(0);
+    pointer-events:none; opacity:0; z-index:3;
+  }
+  .tk-center-logo img, .tk-center-logo .sf-badge-fallback{
+    width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 4px 10px rgba(0,0,0,.5));
+  }
+  .tk-center-logo.on{ animation:tk-logo-pop 1.6s cubic-bezier(.2,.8,.2,1.2) forwards; }
+  @keyframes tk-logo-pop{
+    0%  { opacity:0; transform:translate(-50%, -50%) scale(.2); }
+    25% { opacity:1; transform:translate(-50%, -50%) scale(1.15); }
+    40% { transform:translate(-50%, -50%) scale(1); }
+    75% { opacity:1; transform:translate(-50%, -50%) scale(1); }
+    100%{ opacity:0; transform:translate(-50%, -50%) scale(.9); }
+  }
+  @media (max-width:360px){
+    .tk-badge{ width:44px; height:44px; font-size:21px; }
+    .tk-spot{ transform:translate(-50%, -24px); }
+    .tk-photo{ width:40px; height:40px; border-width:2px; }
+    .tk-spot.revealed{ transform:translate(-50%, -20px); }
+    .tk-chip{ min-width:20px; height:17px; font-size:10px; right:-7px; }
+    .tk-name{ font-size:8.5px; max-width:66px; padding:1px 4px; }
+  }
+
+  .tk-status{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; min-height:26px; }
+  .tk-result{ font-size:13px; font-weight:700; }
+  .tk-result.good{ color:var(--good); }
+  .tk-result.bad{ color:var(--bad); }
+  .tk-logos{ display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; margin-bottom:10px; }
+  .tk-logo{
+    position:relative; aspect-ratio:1; min-width:0; padding:5px; cursor:pointer;
+    background:#FBF3E6; border:2px solid var(--line); border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .12s ease, border-color .15s ease;
+  }
+  .tk-logo:hover:not(:disabled){ transform:translateY(-1px); border-color:var(--orange); }
+  .tk-logo img, .tk-logo .sf-badge-fallback{ width:100%; height:100%; object-fit:contain; font-size:10px; }
+  .tk-logo:disabled{ cursor:default; }
+  .tk-logo.wrong{ opacity:.35; border-color:var(--bad); }
+  .tk-logo.wrong::after{
+    content:"\2715"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--bad); font-size:28px; font-weight:700;
+  }
+  .tk-logo.right{ border-color:var(--good); background:var(--good-soft); box-shadow:0 0 0 3px var(--good); }
+  .tk-logo.faded{ opacity:.35; }
+  .tk-logo.shake{ animation:cp-shake .4s ease; }
+  @media (prefers-reduced-motion: reduce){
+    .tk-spot > *, .tk-name, .tk-logo.shake, .tk-spot.revealed .tk-photo, .tk-spot.revealed .tk-badge{ animation:none; }
+    .tk-glow.on, .tk-center-logo.on{ animation:none; opacity:0; }
+  }
+
   /* ---------- my stats ---------- */
   .topbar-right{ display:flex; align-items:center; gap:8px; }
   .stats-icon-btn{
@@ -1135,37 +1254,42 @@
     <div class="grid">
       <button class="tile" data-game="moreless">
         <div class="num">01</div>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="12" width="7" height="10" rx="1.6"/><rect x="14" y="8" width="7" height="14" rx="1.6"/><path d="M17.5 1.5 L21.5 6 H13.5 Z"/></svg>
         <div class="name">Who's Got More?</div>
         <div class="desc">A stat, two players. Pick the one with more and keep the streak alive.</div>
       </button>
 
       <button class="tile" data-game="startingfive">
         <div class="num">02</div>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 1.5 H10 Q12 5 14 1.5 H16.5 V6 Q19.5 7 19.5 10 V22.5 H4.5 V10 Q4.5 7 7.5 6 Z"/></svg>
         <div class="name">Starting Five</div>
         <div class="desc">Five random franchises, one stat. Draft the highest-scoring starting five you can.</div>
       </button>
 
       <button class="tile" data-game="careerpath">
         <div class="num">03</div>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18 L12 6.5 L20.5 15.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="3.5" cy="18" r="2.7"/><circle cx="12" cy="6.5" r="2.7"/><circle cx="20.5" cy="15.5" r="2.7"/></svg>
         <div class="name">Career Path</div>
         <div class="desc">Just the teams, in order. Name the player.</div>
       </button>
 
       <button class="tile" data-game="hoopsgrid">
         <div class="num">04</div>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9.2" y="2" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="16.4" y="2" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="9.2" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9.2" y="9.2" width="5.6" height="5.6" rx="1.2" fill="currentColor" stroke="currentColor" stroke-width="1.3"/><rect x="16.4" y="9.2" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="16.4" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9.2" y="16.4" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="16.4" y="16.4" width="5.6" height="5.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
         <div class="name">Hoops Grid</div>
         <div class="desc">Nine squares. Name a player who fits each row and column.</div>
       </button>
 
-      <button class="tile locked" disabled>
+      <button class="tile" data-game="2klineup">
         <div class="num">05</div>
-        <div class="name">NBA Connections</div>
-        <div class="desc">16 players, four hidden groups of four.</div>
-        <span class="soon">Coming soon</span>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="0.8" width="7" height="1.6" rx=".8"/><circle cx="12" cy="4.6" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="20.5" r="2.5"/><circle cx="3.5" cy="15" r="2.5"/><circle cx="20.5" cy="15" r="2.5"/><circle cx="7.5" cy="10" r="2.5"/><circle cx="16.5" cy="10" r="2.5"/></svg>
+        <div class="name">2K Lineup</div>
+        <div class="desc">Five 2K ratings on the court. Name the team.</div>
       </button>
 
       <button class="tile locked" disabled>
         <div class="num">06</div>
+        <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="4" cy="5" r="2.4"/><circle cx="4" cy="12" r="2.4"/><circle cx="4" cy="19" r="2.4"/><rect x="8.5" y="3.6" width="13" height="2.8" rx="1.4"/><rect x="8.5" y="10.6" width="10" height="2.8" rx="1.4"/><rect x="8.5" y="17.6" width="7" height="2.8" rx="1.4"/></svg>
         <div class="name">Draft Order</div>
         <div class="desc">Five names, one draft class. Sort the picks.</div>
         <span class="soon">Coming soon</span>
@@ -1353,6 +1477,50 @@
         <button class="primary-btn" id="grid-again">Play Again</button>
         <button class="ghost-btn" id="grid-hub">Back to Hub</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= 2K LINEUP ================= -->
+  <div class="screen" id="screen-tk">
+    <div class="gamebar">
+      <div class="streakbox">
+        <div class="item">
+          <div class="label">Streak</div>
+          <div class="val tabular" id="tk-streak">0</div>
+        </div>
+        <div class="item">
+          <div class="label">Best</div>
+          <div class="val tabular" id="tk-best">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="category-banner tk-banner">
+      <div class="cat impact">2K LINEUP</div>
+      <div class="hint">Name the team from its starting five's 2K ratings</div>
+    </div>
+
+    <div class="tk-court" id="tk-court">
+      <img class="tk-court-img" src="half-court.webp" alt="Half court">
+      <div class="tk-glow" id="tk-glow"></div>
+      <div id="tk-spots"></div>
+      <div class="tk-center-logo" id="tk-center-logo" aria-hidden="true"></div>
+    </div>
+
+    <div class="tk-status">
+      <div class="cp-guesses" id="tk-guesses" aria-label="Guesses left"></div>
+      <div class="tk-result" id="tk-result"></div>
+    </div>
+
+    <div class="tk-logos" id="tk-logos" role="group" aria-label="Pick the team"></div>
+
+    <div class="next-row" id="tk-next" hidden>
+      <button class="primary-btn" id="tk-continue">Next Team</button>
+    </div>
+    <!-- end of a run: stay on the court, just offer these -->
+    <div class="actions" id="tk-end" hidden>
+      <button class="primary-btn" id="tk-again">Play Again</button>
+      <button class="ghost-btn" id="tk-hub">Back to Hub</button>
     </div>
   </div>
 
@@ -2627,7 +2795,7 @@
     var screens = document.querySelectorAll(".screen");
     for(var i=0;i<screens.length;i++){ screens[i].classList.remove("active"); }
     document.getElementById(id).classList.add("active");
-    document.body.classList.toggle("playing", id === "screen-ml" || id === "screen-sf-play" || id === "screen-cp" || id === "screen-grid");
+    document.body.classList.toggle("playing", id === "screen-ml" || id === "screen-sf-play" || id === "screen-cp" || id === "screen-grid" || id === "screen-tk");
     document.getElementById("open-stats").classList.toggle("on", id === "screen-stats");
     document.querySelectorAll("#topbar-game .gamebar").forEach(function(bar){
       bar.classList.toggle("current", bar.getAttribute("data-screen") === id);
@@ -3448,6 +3616,201 @@
   });
 
   // ---------------------------------------------------------------
+  // 2K Lineup: a half court shows a team's starting five as NBA 2K
+  // ratings on each position's spot; tap the right team from all 30
+  // logos. 3 guesses per team, no hints. Endless streak; each team comes
+  // up once per run, and naming all 30 is a perfect run.
+  // Ratings: NBA 2K27 via 2kratings.com, retrieved 27 Sept 2026 (from the
+  // NBA_Starting_5_2K_Ratings workbook). p = [position, player, rating].
+  // ---------------------------------------------------------------
+  var TK_TEAMS = [{"code":"ATL","p":[["PG","C.J. McCollum",83],["SG","Nickeil Alexander-Walker",83],["SF","Dyson Daniels",81],["PF","Jalen Johnson",87],["C","Onyeka Okongwu",81]]},{"code":"BOS","p":[["PG","Payton Pritchard",82],["SG","Derrick White",83],["SF","Jayson Tatum",93],["PF","Paul George",82],["C","Mitchell Robinson",80]]},{"code":"BRK","p":[["PG","Nolan Traore",76],["SG","Egor Dëmin",76],["SF","Michael Porter Jr.",85],["PF","Julius Randle",83],["C","Noah Clowney",76]]},{"code":"CHA","p":[["PG","Coby White",80],["SG","Brandon Miller",85],["SF","Kon Knueppel",84],["PF","Naz Reid",82],["C","Moussa Diabaté",79]]},{"code":"CHI","p":[["PG","Josh Giddey",84],["SG","Norman Powell",84],["SF","Matas Buzelis",81],["PF","Caleb Wilson",77],["C","Nicolas Claxton",80]]},{"code":"CLE","p":[["PG","James Harden",87],["SG","Donovan Mitchell",93],["SF","Peyton Watson",79],["PF","Evan Mobley",87],["C","Jarrett Allen",85]]},{"code":"DAL","p":[["PG","Kyrie Irving",87],["SG","Max Christie",75],["SF","Cooper Flagg",87],["PF","P.J. Washington",79],["C","Daniel Gafford",79]]},{"code":"DEN","p":[["PG","Jamal Murray",89],["SG","Christian Braun",79],["SF","DeMar DeRozan",83],["PF","Aaron Gordon",83],["C","Nikola Jokic",97]]},{"code":"DET","p":[["PG","Cade Cunningham",94],["SG","Duncan Robinson",79],["SF","Ausar Thompson",85],["PF","John Collins",79],["C","Jalen Duren",85]]},{"code":"GSW","p":[["PG","Stephen Curry",93],["SG","Brandin Podziemski",79],["SF","Jimmy Butler",85],["PF","Draymond Green",79],["C","Kristaps Porzingis",81]]},{"code":"HOU","p":[["PG","Reed Sheppard",79],["SG","Amen Thompson",86],["SF","Kevin Durant",93],["PF","Jabari Smith Jr.",80],["C","Alperen Sengun",87]]},{"code":"IND","p":[["PG","Tyrese Haliburton",90],["SG","Andrew Nembhard",81],["SF","Kelly Oubre Jr.",79],["PF","Pascal Siakam",87],["C","Ivica Zubac",84]]},{"code":"LAC","p":[["PG","Darius Garland",84],["SG","Max Strus",78],["SF","Brandon Ingram",84],["PF","Rui Hachimura",79],["C","Brook Lopez",77]]},{"code":"LAL","p":[["PG","Luka Doncic",96],["SG","Austin Reaves",88],["SF","Ziaire Williams",75],["PF","Jarred Vanderbilt",76],["C","Walker Kessler",81]]},{"code":"MEM","p":[["PG","Ty Jerome",80],["SG","Cedric Coward",80],["SF","Jerami Grant",79],["PF","Cameron Boozer",79],["C","Zach Edey",80]]},{"code":"MIA","p":[["PG","Davion Mitchell",77],["SG","Tim Hardaway Jr.",79],["SF","Andrew Wiggins",79],["PF","Giannis Antetokounmpo",96],["C","Bam Adebayo",87]]},{"code":"MIL","p":[["PG","Ryan Rollins",80],["SG","Tyler Herro",85],["SF","Caris LeVert",78],["PF","Jaime Jaquez Jr.",78],["C","Myles Turner",79]]},{"code":"MIN","p":[["PG","LaMelo Ball",86],["SG","Ayo Dosunmu",81],["SF","Anthony Edwards",95],["PF","Jaden McDaniels",85],["C","Rudy Gobert",84]]},{"code":"NOP","p":[["PG","Dejounte Murray",82],["SG","Trey Murphy III",85],["SF","Saddiq Bey",80],["PF","Zion Williamson",85],["C","Derik Queen",79]]},{"code":"NYK","p":[["PG","Jalen Brunson",96],["SG","Mikal Bridges",84],["SF","OG Anunoby",88],["PF","Josh Hart",82],["C","Karl-Anthony Towns",93]]},{"code":"OKC","p":[["PG","Shai Gilgeous-Alexander",97],["SG","Ajay Mitchell",82],["SF","Alex Caruso",81],["PF","Jalen Williams",85],["C","Chet Holmgren",86]]},{"code":"ORL","p":[["PG","Jalen Suggs",80],["SG","Desmond Bane",84],["SF","Franz Wagner",85],["PF","Paolo Banchero",87],["C","Wendell Carter Jr.",79]]},{"code":"PHI","p":[["PG","Tyrese Maxey",92],["SG","V.J. Edgecombe",83],["SF","Jaylen Brown",91],["PF","LeBron James",91],["C","Joel Embiid",91]]},{"code":"PHO","p":[["PG","Devin Booker",91],["SG","Jalen Green",81],["SF","Dillon Brooks",82],["PF","Miles Bridges",80],["C","Mark Williams",78]]},{"code":"POR","p":[["PG","Damian Lillard",86],["SG","Ja Morant",84],["SF","Deni Avdija",88],["PF","Toumani Camara",80],["C","Donovan Clingan",82]]},{"code":"SAC","p":[["PG","Malik Monk",79],["SG","Zach LaVine",82],["SF","De’Andre Hunter",77],["PF","Keegan Murray",79],["C","Domantas Sabonis",85]]},{"code":"SAS","p":[["PG","De’Aaron Fox",84],["SG","Stephon Castle",87],["SF","Devin Vassell",81],["PF","Tobias Harris",81],["C","Victor Wembanyama",97]]},{"code":"TOR","p":[["PG","Immanuel Quickley",82],["SG","R.J. Barrett",82],["SF","Kawhi Leonard",93],["PF","Scottie Barnes",88],["C","Collin Murray-Boyles",80]]},{"code":"UTA","p":[["PG","Keyonte George",84],["SG","Darryn Peterson",79],["SF","Lauri Markkanen",86],["PF","Jaren Jackson Jr.",86],["C","Kyle Filipowski",78]]},{"code":"WAS","p":[["PG","Trae Young",87],["SG","Tre Johnson",78],["SF","AJ Dybantsa",79],["PF","Anthony Davis",90],["C","Alexandre Sarr",83]]}];
+  var TK_GUESSES = 3;
+  // Spot centres on the court image, in % of its width/height (basket at
+  // top; the image is cropped just below the top of the 3-point arc).
+  var TK_SPOTS = {
+    PG:{ x:50, y:76 },     // top of the 3-point arc
+    SG:{ x:80, y:56.8 },   // right wing
+    SF:{ x:18, y:56.8 },   // left wing
+    PF:{ x:39, y:40.5 },   // left elbow
+    C: { x:65, y:23 }      // right low block
+  };
+
+  var tk = { streak:0, bestBefore:0, deck:[], team:null, left:TK_GUESSES, wrong:[], done:false };
+
+  function tkBest(){ return statsLoad().tk.best; }
+
+  function startTwoKLineup(){
+    statsGameStarted("tk", null);
+    tk.streak = 0;
+    tk.bestBefore = tkBest();
+    tk.deck = cpShuffle(TK_TEAMS);
+    document.getElementById("tk-streak").textContent = 0;
+    document.getElementById("tk-best").textContent = tk.bestBefore;
+    showScreen("screen-tk");
+    tkNextTeam();
+  }
+
+  function tkNextTeam(){
+    window.scrollTo(0, 0);
+    if(!tk.deck.length){ tkEndRun(true); return; } // named all 30
+    tk.team = tk.deck.shift();
+    tk.left = TK_GUESSES;
+    tk.wrong = [];
+    tk.done = false;
+    document.getElementById("tk-court").className = "tk-court";
+    document.getElementById("tk-glow").classList.remove("on");
+    document.getElementById("tk-center-logo").classList.remove("on");
+    document.getElementById("tk-next").hidden = true;
+    document.getElementById("tk-end").hidden = true;
+    var res = document.getElementById("tk-result");
+    res.textContent = ""; res.className = "tk-result";
+    tkRenderSpots(false);
+    tkRenderLogos();
+    tkRenderGuesses();
+  }
+
+  // 2K card tiers: 90+ amethyst, 85–89 gold, 80–84 silver, under 80 bronze.
+  function tkTier(r){ return r >= 90 ? "amethyst" : r >= 85 ? "gold" : r >= 80 ? "silver" : "bronze"; }
+
+  // Headshots for lineup players who aren't in the Who's Got More lists
+  // (Basketball-Reference headshots; 2026 rookies without an NBA game yet
+  // have none, so they keep their rating badge).
+  var TK_EXTRA_PHOTOS = {"kyrie irving":"irvinky01","tyrese haliburton":"halibty01","c.j. mccollum":"mccolcj01","nickeil alexander-walker":"alexani01","onyeka okongwu":"okongon01","paul george":"georgpa01","mitchell robinson":"robinmi01","nolan traore":"traorno01","egor demin":"demineg01","noah clowney":"clownno01","moussa diabate":"diabamo01","matas buzelis":"buzelma01","peyton watson":"watsope01","max christie":"chrisma02","p.j. washington":"washipj01","daniel gafford":"gaffoda01","duncan robinson":"robindu01","ausar thompson":"thompau01","john collins":"collijo01","brandin podziemski":"podzibr01","reed sheppard":"sheppre01","andrew nembhard":"nembhan01","kelly oubre jr.":"oubreke01","max strus":"strusma01","rui hachimura":"hachiru01","ziaire williams":"willizi02","jarred vanderbilt":"vandeja01","ty jerome":"jeromty01","cedric coward":"cowarce01","jerami grant":"grantje01","zach edey":"edeyza01","davion mitchell":"mitchda01","tim hardaway jr.":"hardati02","ryan rollins":"rolliry01","caris levert":"leverca01","jaime jaquez jr.":"jaqueja01","ayo dosunmu":"dosunay01","jaden mcdaniels":"mcdanja02","dejounte murray":"murrade01","saddiq bey":"beysa01","derik queen":"queende01","ajay mitchell":"mitchaj01","jalen suggs":"suggsja01","wendell carter jr.":"cartewe01","v.j. edgecombe":"edgecvj01","miles bridges":"bridgmi02","mark williams":"willima07","damian lillard":"lillada01","donovan clingan":"clingdo01","malik monk":"monkma01","de’andre hunter":"huntede01","de’aaron fox":"foxde01","stephon castle":"castlst01","devin vassell":"vassede01","tobias harris":"harrito02","r.j. barrett":"barrerj01","collin murray-boyles":"murraco01","keyonte george":"georgke01","kyle filipowski":"filipky01","tre johnson":"johnstr03","nicolas claxton":"claxtni01","alexandre sarr":"sarral01"};
+  function tkPhoto(name){
+    var id = CP_PHOTO_IDS[cpNorm(name)] || TK_EXTRA_PHOTOS[cpNorm(name)];
+    return id && PHOTOS[id];
+  }
+
+  // reveal = the round is over: badges flip to headshots (when we have
+  // one) with the rating as a small chip, and names show underneath.
+  function tkRenderSpots(reveal){
+    document.getElementById("tk-spots").innerHTML = tk.team.p.map(function(pl, i){
+      var spot = TK_SPOTS[pl[0]], tier = tkTier(pl[2]), url = reveal && tkPhoto(pl[1]);
+      var face = url
+        ? '<div class="tk-photo"><img src="' + url + '" alt=""><span class="tk-chip tabular t-' + tier + '">' + pl[2] + '</span></div>'
+        : '<div class="tk-badge tabular t-' + tier + '">' + pl[2] + '</div>';
+      return '<div class="tk-spot' + (reveal ? " revealed" : "") + '" style="left:' + spot.x + '%;top:' + spot.y + '%;--i:' + i + '">' +
+        face + '<div class="tk-pos">' + pl[0] + '</div>' +
+        (reveal ? '<div class="tk-name">' + statsEsc(pl[1]) + '</div>' : '') + '</div>';
+    }).join("");
+  }
+
+  // Correct answer: the court glows in the team's colour and its logo pops
+  // up in the middle, then fades so the names stay readable.
+  function tkCelebrateTeam(code){
+    var glow = document.getElementById("tk-glow"), logo = document.getElementById("tk-center-logo");
+    glow.style.setProperty("--team", sfTeamColor(code));
+    logo.innerHTML = sfTeamBadgeHtml(code, "");
+    [glow, logo].forEach(function(el){ el.classList.remove("on"); void el.offsetWidth; el.classList.add("on"); });
+  }
+
+  function tkRenderLogos(){
+    var box = document.getElementById("tk-logos");
+    var sorted = SF_FRANCHISES.slice().sort(function(a, b){ return a.name.localeCompare(b.name); });
+    box.innerHTML = "";
+    sorted.forEach(function(f){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "tk-logo";
+      b.setAttribute("data-code", f.code);
+      b.setAttribute("aria-label", f.name);
+      b.innerHTML = sfTeamBadgeHtml(f.code, "");
+      b.addEventListener("click", function(){ tkGuess(f.code, b); });
+      box.appendChild(b);
+    });
+  }
+
+  function tkRenderGuesses(){
+    var html = '<span>Guesses</span>';
+    for(var i = 0; i < TK_GUESSES; i++){
+      html += '<span class="cp-ball' + (i < tk.left ? "" : " used") + '" aria-hidden="true">&#127936;</span>';
+    }
+    var el = document.getElementById("tk-guesses");
+    el.innerHTML = html;
+    el.setAttribute("aria-label", tk.left + " guesses left");
+  }
+
+  function tkGuess(code, btn){
+    if(tk.done) return;
+    if(code === tk.team.code){
+      tk.done = true;
+      tk.streak++;
+      var newBest = tk.streak > tkBest();
+      statsUpdate(function(st){ st.tk.named++; st.tk.best = Math.max(st.tk.best, tk.streak); });
+      document.getElementById("tk-streak").textContent = tk.streak;
+      document.getElementById("tk-best").textContent = Math.max(tk.streak, tk.bestBefore, tkBest());
+      celebrateStreak(newBest, "tk-streak", "tk-best");
+      btn.classList.add("right");
+      tkFinishTeam(true);
+      tkCelebrateTeam(tk.team.code);
+      return;
+    }
+    tk.left--;
+    btn.classList.add("wrong");
+    btn.disabled = true;
+    btn.classList.remove("shake"); void btn.offsetWidth; btn.classList.add("shake");
+    tkRenderGuesses();
+    if(tk.left <= 0){
+      tk.done = true;
+      var right = document.querySelector('.tk-logo[data-code="' + tk.team.code + '"]');
+      if(right) right.classList.add("right");
+      tkFinishTeam(false);
+    }
+  }
+
+  function tkFinishTeam(correct){
+    document.querySelectorAll(".tk-logo").forEach(function(b){
+      if(!b.classList.contains("right") && !b.classList.contains("wrong")) b.classList.add("faded");
+      b.disabled = true;
+    });
+    document.getElementById("tk-court").classList.add(correct ? "solved" : "missed");
+    tkRenderSpots(true);
+    var res = document.getElementById("tk-result");
+    res.textContent = (correct ? "Got it! " : "It was the ") + sfFranchiseName(tk.team.code);
+    res.className = "tk-result " + (correct ? "good" : "bad");
+    if(!correct){ tkEndRun(false); return; }
+    if(!tk.deck.length){ tkEndRun(true); return; } // that was the 30th team
+    document.getElementById("tk-next").hidden = false;
+    tkScrollTo("tk-next");
+  }
+
+  function tkContinue(){ tkNextTeam(); }
+
+  // The run ends right on the court: save it, say how it went, and offer
+  // Play Again / Back to Hub (no separate results screen).
+  function tkEndRun(cleared){
+    statsUpdate(function(st){
+      statsPush(st.tk.hist, tk.streak);
+      if(cleared) st.tk.perfect++;
+    });
+    var newBest = tk.streak > tk.bestBefore;
+    var res = document.getElementById("tk-result");
+    if(cleared){
+      res.textContent = "You named all 30 teams!";
+      res.className = "tk-result good";
+      goldConfetti();
+    } else if(newBest){
+      res.textContent += " · New best: " + tk.streak;
+    }
+    document.getElementById("tk-next").hidden = true;
+    document.getElementById("tk-end").hidden = false;
+    tkScrollTo("tk-end");
+  }
+
+  // Bring the buttons into view on short phone screens.
+  function tkScrollTo(id){
+    var el = document.getElementById(id);
+    if(el.getBoundingClientRect().bottom > window.innerHeight) el.scrollIntoView({ block:"end", behavior:"smooth" });
+  }
+
+  document.querySelectorAll('.tile[data-game="2klineup"]').forEach(function(btn){
+    btn.addEventListener("click", startTwoKLineup);
+  });
+  document.getElementById("tk-continue").addEventListener("click", tkContinue);
+  document.getElementById("tk-again").addEventListener("click", startTwoKLineup);
+  document.getElementById("tk-hub").addEventListener("click", function(){ showScreen("screen-hub"); });
+
+  // ---------------------------------------------------------------
   // My Stats: lifetime numbers for each game, kept in this browser only
   // (localStorage). Who's Got More and Career Path are split by Current /
   // All-Time; the page shows whichever mode the switch is on. Starting
@@ -3465,6 +3828,7 @@
       sf: { games:0, bestPct:0, bestTotal:0, totalPct:0, perfect:0, hist:[], bestLineup:null },
       cp: { current: cpm(), alltime: cpm() },
       grid: { played:0, completed:0, squares:0 },
+      tk: { best:0, games:0, named:0, perfect:0, hist:[] },
       days: { last:null, streak:0, best:0 },
       migrated: false
     };
@@ -3652,7 +4016,7 @@
     var mode = statsMode(state.mode);
     var modeName = mode === "alltime" ? "All-Time" : "Current";
     var ml = st.ml[mode], cpm = st.cp[mode], sf = st.sf;
-    var totalGames = st.ml.current.games + st.ml.alltime.games + sf.games + st.cp.current.games + st.cp.alltime.games + st.grid.played;
+    var totalGames = st.ml.current.games + st.ml.alltime.games + sf.games + st.cp.current.games + st.cp.alltime.games + st.grid.played + st.tk.games;
     var dayStreak = statsDayStreak(st);
 
     var iq = statsHoopIQ(st);
@@ -3723,7 +4087,14 @@
         statTile(st.grid.played, "Grids played") +
         statTile(st.grid.played ? Math.round(st.grid.completed / st.grid.played * 100) + "%" : "–", "Completion rate") +
         statTile(st.grid.played ? statsRound(st.grid.squares / st.grid.played) : "–", "Avg squares") +
-      '</div>');
+      '</div>') +
+      statsCard("05", "2K Lineup", '<div class="stats-grid">' +
+        statTile(st.tk.best, "Best streak") +
+        statTile(st.tk.named, "Teams named") +
+        statTile(st.tk.games, "Games") +
+        statTile(st.tk.perfect, "Perfect runs") +
+      '</div><div class="chart-title">Streaks, last ' + STATS_HISTORY + ' runs</div>' +
+      statsBars(st.tk.hist, 5, function(v){ return String(v); }, "run"));
   }
 
   // The stats button toggles: tap again on the stats page to go home.
