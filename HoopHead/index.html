@@ -833,7 +833,30 @@
   .tk-result{ font-size:13px; font-weight:700; }
   .tk-result.good{ color:var(--good); }
   .tk-result.bad{ color:var(--bad); }
-  .tk-logos{ display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; margin-bottom:10px; }
+  /* Phone: one 6-column grid under the court, alphabetical. */
+  .tk-board{ display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; margin-bottom:10px; }
+  .tk-center{ grid-column:1 / -1; order:-1; }
+  .tk-center .tk-status{ margin-bottom:2px; } /* the grid gap adds the rest */
+  .tk-conf, .tk-conf-logos{ display:contents; }
+  .tk-conf-label{ display:none; }
+  .tk-board .tk-logo{ order:var(--alpha); }
+  /* Wide screens: West | court | East, no scrolling. */
+  @media (min-width:900px){
+    body[data-screen="screen-tk"] .wrap{ max-width:1100px; }
+    .tk-board{ grid-template-columns:1fr minmax(380px, 460px) 1fr; gap:24px; align-items:start; }
+    .tk-center{ grid-column:2; grid-row:1; order:0; }
+    .tk-center .tk-court{ margin-bottom:10px; }
+    .tk-conf{ display:block; grid-row:1; }
+    .tk-west{ grid-column:1; }
+    .tk-east{ grid-column:3; }
+    .tk-conf-label{
+      display:block; text-align:center; margin-bottom:10px;
+      font-family:'Anton', sans-serif; font-size:15px; letter-spacing:.06em; text-transform:uppercase; color:var(--orange);
+    }
+    .tk-conf-logos{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+    .tk-board .tk-logo{ order:0; padding:8px; }
+    body[data-screen="screen-tk"] .next-row, body[data-screen="screen-tk"] #tk-end{ max-width:460px; margin-inline:auto; }
+  }
   .tk-logo{
     position:relative; aspect-ratio:1; min-width:0; padding:5px; cursor:pointer;
     background:#FBF3E6; border:2px solid var(--line); border-radius:10px;
@@ -854,6 +877,119 @@
   @media (prefers-reduced-motion: reduce){
     .tk-spot > *, .tk-name, .tk-logo.shake, .tk-spot.revealed .tk-photo, .tk-spot.revealed .tk-badge{ animation:none; }
     .tk-glow.on, .tk-center-logo.on{ animation:none; opacity:0; }
+  }
+
+  /* ---------- idle animations (home page, wide computer screens) ---------- */
+  .idle-side{
+    position:fixed; bottom:12px; width:clamp(150px, 21vw, 250px); height:clamp(150px, 21vw, 250px); z-index:20; pointer-events:none;
+    opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; display:none;
+  }
+  .idle-side svg{ width:100%; height:100%; overflow:visible; display:block; }
+  .idle-left{ left:12px; }
+  .idle-right{ right:12px; }
+  @media (min-width:760px) and (any-hover:hover){ .idle-side{ display:block; } }
+  @media (prefers-reduced-motion: reduce){ .idle-side{ display:none !important; } }
+  body.idle-on .idle-side{ opacity:1; transform:none; }
+  .ia-ink{ fill:var(--black); }
+  .ia-line{ fill:none; stroke:var(--black); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+  .ia-board{ fill:var(--paper); stroke:var(--black); stroke-width:3; }
+  .ia-rim{ fill:var(--bad); }
+  .ia-ballc{ fill:var(--orange); stroke:var(--black); stroke-width:2; }
+  .ia-seam{ fill:none; stroke:var(--black); stroke-width:1.6; }
+  .ia-limb{ fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .ia-num{ fill:#FFFCF5; font-family:'Anton', sans-serif; }
+  .ia-shadow{ fill:#000; opacity:.12; }
+  /* every loop only runs while idle, and restarts from frame 1 each time */
+  body:not(.idle-on) .idle-side *{ animation:none !important; }
+
+  /* Right: two dribbles, jump shot, swish, ball comes back (4.8 s loop) */
+  .rs-ball{ animation:rs-ball 4.8s infinite; }
+  .rs-spin{ animation:ia-spin 1.2s linear infinite; }
+  .rs-body{ animation:rs-body 4.8s ease-in-out infinite; }
+  .rs-arm{ animation:rs-arm 4.8s ease-in-out infinite; transform-origin:114px 112px; }
+  .rs-guide{ animation:rs-guide 4.8s ease-in-out infinite; transform-origin:86px 112px; }
+  .rs-net{ animation:rs-net 4.8s ease infinite; transform-box:fill-box; transform-origin:top center; }
+  @keyframes rs-ball{
+    0%     { transform:translate(136px,158px); animation-timing-function:ease-in; }
+    8.33%  { transform:translate(136px,233px); animation-timing-function:ease-out; }
+    16.67% { transform:translate(136px,158px); animation-timing-function:ease-in; }
+    25%    { transform:translate(136px,233px); animation-timing-function:ease-out; }
+    33.33% { transform:translate(136px,158px); animation-timing-function:ease-in-out; }
+    41.67% { transform:translate(134px,54px);  animation-timing-function:linear; }
+    44%    { transform:translate(137px,46px);  animation-timing-function:ease-out; }
+    52%    { transform:translate(180px,8px);   animation-timing-function:ease-in; }
+    60%    { transform:translate(216px,52px);  animation-timing-function:linear; }
+    65%    { transform:translate(216px,94px);  animation-timing-function:ease-in; }
+    73%    { transform:translate(216px,233px); animation-timing-function:ease-out; }
+    80%    { transform:translate(190px,192px); animation-timing-function:ease-in; }
+    87%    { transform:translate(160px,233px); animation-timing-function:ease-out; }
+    100%   { transform:translate(136px,158px); }
+  }
+  @keyframes rs-body{
+    0%, 33.33% { transform:translateY(0); }
+    37.5%      { transform:translateY(5px); }
+    41.67%, 47%{ transform:translateY(-10px); }
+    54%, 100%  { transform:translateY(0); }
+  }
+  @keyframes rs-arm{
+    0%, 16.67%, 33.33% { transform:rotate(0); }
+    8.33%, 25%         { transform:rotate(12deg); }
+    41.67%             { transform:rotate(-120deg); }
+    50%                { transform:rotate(-128deg); }
+    60%                { transform:rotate(-112deg); }
+    72%, 100%          { transform:rotate(0); }
+  }
+  @keyframes rs-guide{
+    0%, 33.33% { transform:rotate(0); }
+    41.67%, 50%{ transform:rotate(140deg); }
+    64%, 100%  { transform:rotate(0); }
+  }
+  @keyframes rs-net{ 0%, 60%{ transform:none; } 64%{ transform:scale(.9,1.32); } 70%{ transform:scale(1.05,.9); } 76%, 100%{ transform:none; } }
+  @keyframes ia-spin{ from{ transform:rotate(0); } to{ transform:rotate(360deg); } }
+
+  /* Left: dribble combo — right hand, crossover, left hand, between the legs (3.2 s loop) */
+  .ls-ball{ animation:ls-ball 3.2s infinite; }
+  .ls-spin{ animation:ia-spin .8s linear infinite reverse; }
+  .ls-body{ animation:ls-body 3.2s ease-in-out infinite; }
+  .ls-rarm{ animation:ls-rarm 3.2s ease-in-out infinite; transform-origin:150px 104px; }
+  .ls-larm{ animation:ls-larm 3.2s ease-in-out infinite; transform-origin:110px 104px; }
+  @keyframes ls-ball{
+    0%    { transform:translate(178px,160px); animation-timing-function:ease-in; }
+    12.5% { transform:translate(178px,233px); animation-timing-function:ease-out; }
+    25%   { transform:translate(178px,160px); animation-timing-function:ease-in; }
+    37.5% { transform:translate(130px,233px); animation-timing-function:ease-out; }
+    50%   { transform:translate(82px,160px);  animation-timing-function:ease-in; }
+    62.5% { transform:translate(82px,233px);  animation-timing-function:ease-out; }
+    75%   { transform:translate(82px,160px);  animation-timing-function:ease-in; }
+    87.5% { transform:translate(130px,228px); animation-timing-function:ease-out; }
+    100%  { transform:translate(178px,160px); }
+  }
+  @keyframes ls-body{
+    0%   { transform:translate(4px,0); }
+    12.5%{ transform:translate(4px,3px); }
+    25%  { transform:translate(3px,0); }
+    37.5%{ transform:translate(0,4px); }
+    50%  { transform:translate(-4px,0); }
+    62.5%{ transform:translate(-4px,3px); }
+    75%  { transform:translate(-3px,0); }
+    87.5%{ transform:translate(0,4px); }
+    100% { transform:translate(4px,0); }
+  }
+  @keyframes ls-rarm{
+    0%, 25% { transform:rotate(0); }
+    12.5%   { transform:rotate(14deg); }
+    37.5%   { transform:rotate(-8deg); }
+    50%, 75%{ transform:rotate(-14deg); }
+    87.5%   { transform:rotate(-6deg); }
+    100%    { transform:rotate(0); }
+  }
+  @keyframes ls-larm{
+    0%, 25% { transform:rotate(14deg); }
+    37.5%   { transform:rotate(8deg); }
+    50%, 75%{ transform:rotate(0); }
+    62.5%   { transform:rotate(-14deg); }
+    87.5%   { transform:rotate(6deg); }
+    100%    { transform:rotate(14deg); }
   }
 
   /* ---------- my stats ---------- */
@@ -1297,6 +1433,50 @@
     </div>
   </div>
 
+  <!-- Home page on computers: after 15 s with no mouse or
+       keyboard activity, these two looping animations play until the
+       mouse moves or a key is pressed. Original artwork. -->
+  <div class="idle-side idle-left" aria-hidden="true">
+    <svg viewBox="0 0 260 260">
+      <ellipse cx="130" cy="246" rx="62" ry="5" class="ia-shadow"/>
+      <g class="ls-body">
+        <path class="ia-limb" style="stroke:#C68B59;stroke-width:12" d="M116 180 L96 208 L90 238 M144 180 L164 208 L170 238"/>
+        <rect x="76" y="235" width="26" height="10" rx="5" class="ia-ink"/><rect x="158" y="235" width="26" height="10" rx="5" class="ia-ink"/>
+        <rect x="104" y="150" width="52" height="36" rx="7" fill="#24407A"/>
+        <path d="M108 100 Q130 109 152 100 L157 154 L103 154 Z" fill="#3B6FB6"/>
+        <text x="130" y="138" text-anchor="middle" class="ia-num" font-size="18">HH</text>
+        <rect x="124" y="88" width="12" height="12" fill="#C68B59"/>
+        <circle cx="130" cy="80" r="14" fill="#C68B59"/>
+        <path class="ia-ink" d="M116 78 Q116 63 130 63 Q144 63 144 77 Q137 70 130 70 Q121 70 116 78 Z"/>
+        <g class="ls-larm"><path class="ia-limb" style="stroke:#C68B59;stroke-width:9" d="M110 104 L92 130 L84 146"/></g>
+        <g class="ls-rarm"><path class="ia-limb" style="stroke:#C68B59;stroke-width:9" d="M150 104 L168 130 L176 146"/></g>
+      </g>
+      <g class="ls-ball" transform="translate(178 160)"><g class="ls-spin"><circle r="12" class="ia-ballc"/><path class="ia-seam" d="M-12 0 H12 M0 -12 V12 M-7.5 -9.5 Q-1 0 -7.5 9.5 M7.5 -9.5 Q1 0 7.5 9.5"/></g></g>
+    </svg>
+  </div>
+  <div class="idle-side idle-right" aria-hidden="true">
+    <svg viewBox="0 0 260 260">
+      <rect x="186" y="8" width="68" height="46" rx="4" class="ia-board"/>
+      <rect x="208" y="26" width="24" height="17" class="ia-line"/>
+      <g class="rs-ball" transform="translate(136 158)"><g class="rs-spin"><circle r="12" class="ia-ballc"/><path class="ia-seam" d="M-12 0 H12 M0 -12 V12 M-7.5 -9.5 Q-1 0 -7.5 9.5 M7.5 -9.5 Q1 0 7.5 9.5"/></g></g>
+      <g class="rs-net"><path class="ia-line" style="stroke-width:2" d="M196 64 L204 90 M206 64 L210 90 M216 64 L216 90 M226 64 L222 90 M236 64 L228 90 M200 77 L232 77 M204 90 L228 90"/></g>
+      <rect x="192" y="58" width="48" height="7" rx="3.5" class="ia-rim"/>
+      <ellipse cx="102" cy="246" rx="40" ry="5" class="ia-shadow"/>
+      <g class="rs-body">
+        <path class="ia-limb" style="stroke:#8D5A3B;stroke-width:11" d="M92 190 L82 214 L88 238 M110 190 L122 214 L118 238"/>
+        <rect x="74" y="235" width="24" height="10" rx="5" class="ia-ink"/><rect x="108" y="235" width="24" height="10" rx="5" class="ia-ink"/>
+        <rect x="80" y="160" width="42" height="34" rx="6" fill="#6B4226"/>
+        <g class="rs-guide"><path class="ia-limb" style="stroke:#8D5A3B;stroke-width:9" d="M86 112 L74 138 L82 150"/></g>
+        <path d="M82 108 Q100 116 120 108 L124 164 L78 164 Z" fill="#E2611C"/>
+        <text x="101" y="146" text-anchor="middle" class="ia-num" font-size="17">HH</text>
+        <rect x="95" y="96" width="11" height="12" fill="#8D5A3B"/>
+        <circle cx="100" cy="88" r="14" fill="#8D5A3B"/>
+        <path class="ia-ink" d="M86 86 Q86 72 100 72 Q114 72 114 85 Q107 78 100 78 Q91 78 86 86 Z"/>
+        <g class="rs-arm"><path class="ia-limb" style="stroke:#8D5A3B;stroke-width:9" d="M114 112 L128 132 L134 146"/></g>
+      </g>
+    </svg>
+  </div>
+
   <!-- ================= MY STATS ================= -->
   <div class="screen" id="screen-stats">
     <div class="stats-head">
@@ -1497,22 +1677,33 @@
 
     <div class="category-banner tk-banner">
       <div class="cat impact">2K LINEUP</div>
-      <div class="hint">Name the team from its starting five's 2K ratings</div>
+      <div class="hint" id="tk-hint">Name the team from its starting five's 2K ratings</div>
     </div>
 
-    <div class="tk-court" id="tk-court">
-      <img class="tk-court-img" src="half-court.webp" alt="Half court">
-      <div class="tk-glow" id="tk-glow"></div>
-      <div id="tk-spots"></div>
-      <div class="tk-center-logo" id="tk-center-logo" aria-hidden="true"></div>
+    <!-- Wide screens: West logos | court | East logos. Phones: court on
+         top, then all 30 logos in one alphabetical grid. -->
+    <div class="tk-board" role="group" aria-label="Pick the team">
+      <div class="tk-center">
+        <div class="tk-court" id="tk-court">
+          <img class="tk-court-img" src="half-court.webp" alt="Half court">
+          <div class="tk-glow" id="tk-glow"></div>
+          <div id="tk-spots"></div>
+          <div class="tk-center-logo" id="tk-center-logo" aria-hidden="true"></div>
+        </div>
+        <div class="tk-status">
+          <div class="cp-guesses" id="tk-guesses" aria-label="Guesses left"></div>
+          <div class="tk-result" id="tk-result"></div>
+        </div>
+      </div>
+      <div class="tk-conf tk-west">
+        <div class="tk-conf-label">Western Conference</div>
+        <div class="tk-conf-logos" id="tk-west"></div>
+      </div>
+      <div class="tk-conf tk-east">
+        <div class="tk-conf-label">Eastern Conference</div>
+        <div class="tk-conf-logos" id="tk-east"></div>
+      </div>
     </div>
-
-    <div class="tk-status">
-      <div class="cp-guesses" id="tk-guesses" aria-label="Guesses left"></div>
-      <div class="tk-result" id="tk-result"></div>
-    </div>
-
-    <div class="tk-logos" id="tk-logos" role="group" aria-label="Pick the team"></div>
 
     <div class="next-row" id="tk-next" hidden>
       <button class="primary-btn" id="tk-continue">Next Team</button>
@@ -2797,6 +2988,8 @@
     document.getElementById(id).classList.add("active");
     document.body.classList.toggle("playing", id === "screen-ml" || id === "screen-sf-play" || id === "screen-cp" || id === "screen-grid" || id === "screen-tk");
     document.getElementById("open-stats").classList.toggle("on", id === "screen-stats");
+    document.body.setAttribute("data-screen", id);
+    if(typeof idleStop === "function"){ idleStop(); idle.lastActivity = Date.now(); }
     document.querySelectorAll("#topbar-game .gamebar").forEach(function(bar){
       bar.classList.toggle("current", bar.getAttribute("data-screen") === id);
     });
@@ -3624,6 +3817,10 @@
   // NBA_Starting_5_2K_Ratings workbook). p = [position, player, rating].
   // ---------------------------------------------------------------
   var TK_TEAMS = [{"code":"ATL","p":[["PG","C.J. McCollum",83],["SG","Nickeil Alexander-Walker",83],["SF","Dyson Daniels",81],["PF","Jalen Johnson",87],["C","Onyeka Okongwu",81]]},{"code":"BOS","p":[["PG","Payton Pritchard",82],["SG","Derrick White",83],["SF","Jayson Tatum",93],["PF","Paul George",82],["C","Mitchell Robinson",80]]},{"code":"BRK","p":[["PG","Nolan Traore",76],["SG","Egor Dëmin",76],["SF","Michael Porter Jr.",85],["PF","Julius Randle",83],["C","Noah Clowney",76]]},{"code":"CHA","p":[["PG","Coby White",80],["SG","Brandon Miller",85],["SF","Kon Knueppel",84],["PF","Naz Reid",82],["C","Moussa Diabaté",79]]},{"code":"CHI","p":[["PG","Josh Giddey",84],["SG","Norman Powell",84],["SF","Matas Buzelis",81],["PF","Caleb Wilson",77],["C","Nicolas Claxton",80]]},{"code":"CLE","p":[["PG","James Harden",87],["SG","Donovan Mitchell",93],["SF","Peyton Watson",79],["PF","Evan Mobley",87],["C","Jarrett Allen",85]]},{"code":"DAL","p":[["PG","Kyrie Irving",87],["SG","Max Christie",75],["SF","Cooper Flagg",87],["PF","P.J. Washington",79],["C","Daniel Gafford",79]]},{"code":"DEN","p":[["PG","Jamal Murray",89],["SG","Christian Braun",79],["SF","DeMar DeRozan",83],["PF","Aaron Gordon",83],["C","Nikola Jokic",97]]},{"code":"DET","p":[["PG","Cade Cunningham",94],["SG","Duncan Robinson",79],["SF","Ausar Thompson",85],["PF","John Collins",79],["C","Jalen Duren",85]]},{"code":"GSW","p":[["PG","Stephen Curry",93],["SG","Brandin Podziemski",79],["SF","Jimmy Butler",85],["PF","Draymond Green",79],["C","Kristaps Porzingis",81]]},{"code":"HOU","p":[["PG","Reed Sheppard",79],["SG","Amen Thompson",86],["SF","Kevin Durant",93],["PF","Jabari Smith Jr.",80],["C","Alperen Sengun",87]]},{"code":"IND","p":[["PG","Tyrese Haliburton",90],["SG","Andrew Nembhard",81],["SF","Kelly Oubre Jr.",79],["PF","Pascal Siakam",87],["C","Ivica Zubac",84]]},{"code":"LAC","p":[["PG","Darius Garland",84],["SG","Max Strus",78],["SF","Brandon Ingram",84],["PF","Rui Hachimura",79],["C","Brook Lopez",77]]},{"code":"LAL","p":[["PG","Luka Doncic",96],["SG","Austin Reaves",88],["SF","Ziaire Williams",75],["PF","Jarred Vanderbilt",76],["C","Walker Kessler",81]]},{"code":"MEM","p":[["PG","Ty Jerome",80],["SG","Cedric Coward",80],["SF","Jerami Grant",79],["PF","Cameron Boozer",79],["C","Zach Edey",80]]},{"code":"MIA","p":[["PG","Davion Mitchell",77],["SG","Tim Hardaway Jr.",79],["SF","Andrew Wiggins",79],["PF","Giannis Antetokounmpo",96],["C","Bam Adebayo",87]]},{"code":"MIL","p":[["PG","Ryan Rollins",80],["SG","Tyler Herro",85],["SF","Caris LeVert",78],["PF","Jaime Jaquez Jr.",78],["C","Myles Turner",79]]},{"code":"MIN","p":[["PG","LaMelo Ball",86],["SG","Ayo Dosunmu",81],["SF","Anthony Edwards",95],["PF","Jaden McDaniels",85],["C","Rudy Gobert",84]]},{"code":"NOP","p":[["PG","Dejounte Murray",82],["SG","Trey Murphy III",85],["SF","Saddiq Bey",80],["PF","Zion Williamson",85],["C","Derik Queen",79]]},{"code":"NYK","p":[["PG","Jalen Brunson",96],["SG","Mikal Bridges",84],["SF","OG Anunoby",88],["PF","Josh Hart",82],["C","Karl-Anthony Towns",93]]},{"code":"OKC","p":[["PG","Shai Gilgeous-Alexander",97],["SG","Ajay Mitchell",82],["SF","Alex Caruso",81],["PF","Jalen Williams",85],["C","Chet Holmgren",86]]},{"code":"ORL","p":[["PG","Jalen Suggs",80],["SG","Desmond Bane",84],["SF","Franz Wagner",85],["PF","Paolo Banchero",87],["C","Wendell Carter Jr.",79]]},{"code":"PHI","p":[["PG","Tyrese Maxey",92],["SG","V.J. Edgecombe",83],["SF","Jaylen Brown",91],["PF","LeBron James",91],["C","Joel Embiid",91]]},{"code":"PHO","p":[["PG","Devin Booker",91],["SG","Jalen Green",81],["SF","Dillon Brooks",82],["PF","Miles Bridges",80],["C","Mark Williams",78]]},{"code":"POR","p":[["PG","Damian Lillard",86],["SG","Ja Morant",84],["SF","Deni Avdija",88],["PF","Toumani Camara",80],["C","Donovan Clingan",82]]},{"code":"SAC","p":[["PG","Malik Monk",79],["SG","Zach LaVine",82],["SF","De’Andre Hunter",77],["PF","Keegan Murray",79],["C","Domantas Sabonis",85]]},{"code":"SAS","p":[["PG","De’Aaron Fox",84],["SG","Stephon Castle",87],["SF","Devin Vassell",81],["PF","Tobias Harris",81],["C","Victor Wembanyama",97]]},{"code":"TOR","p":[["PG","Immanuel Quickley",82],["SG","R.J. Barrett",82],["SF","Kawhi Leonard",93],["PF","Scottie Barnes",88],["C","Collin Murray-Boyles",80]]},{"code":"UTA","p":[["PG","Keyonte George",84],["SG","Darryn Peterson",79],["SF","Lauri Markkanen",86],["PF","Jaren Jackson Jr.",86],["C","Kyle Filipowski",78]]},{"code":"WAS","p":[["PG","Trae Young",87],["SG","Tre Johnson",78],["SF","AJ Dybantsa",79],["PF","Anthony Davis",90],["C","Alexandre Sarr",83]]}];
+  // All-time starting five per franchise: the valid PG–C assignment with the
+  // highest combined rating on each 2KRatings all-time roster (NBA 2K27,
+  // retrieved 28 Sept 2026, NBA_Starting_5_2K_Ratings workbook).
+  var TK_TEAMS_ALLTIME = [{"code":"ATL","p":[["PG","Trae Young",88],["SG","Cliff Hagan",91],["SF","Dominique Wilkins",95],["PF","Bob Pettit",95],["C","Dikembe Mutombo",92]]},{"code":"BOS","p":[["PG","Bob Cousy",96],["SG","John Havlicek",96],["SF","Larry Bird",99],["PF","Kevin McHale",95],["C","Bill Russell",98]]},{"code":"BRK","p":[["PG","Jason Kidd",95],["SG","Drazen Petrovic",90],["SF","Julius Erving",97],["PF","Kevin Durant",96],["C","Buck Williams",88]]},{"code":"CHA","p":[["PG","Kemba Walker",89],["SG","Eddie Jones",89],["SF","Glen Rice",90],["PF","Larry Johnson",88],["C","Alonzo Mourning",89]]},{"code":"CHI","p":[["PG","Derrick Rose",95],["SG","Michael Jordan",99],["SF","Scottie Pippen",98],["PF","Dennis Rodman",93],["C","Artis Gilmore",93]]},{"code":"CLE","p":[["PG","Kyrie Irving",94],["SG","Donovan Mitchell",93],["SF","LeBron James",99],["PF","Evan Mobley",89],["C","Brad Daugherty",90]]},{"code":"DAL","p":[["PG","Derek Harper",89],["SG","Luka Doncic",93],["SF","Jamal Mashburn",88],["PF","Mark Aguirre",88],["C","Dirk Nowitzki",98]]},{"code":"DEN","p":[["PG","Fat Lever",92],["SG","David Thompson",95],["SF","Alex English",93],["PF","Carmelo Anthony",95],["C","Nikola Jokic",97]]},{"code":"DET","p":[["PG","Isiah Thomas",95],["SG","Joe Dumars",93],["SF","Grant Hill",93],["PF","Dave Debusschere",89],["C","Bob Lanier",93]]},{"code":"GSW","p":[["PG","Stephen Curry",98],["SG","Chris Mullin",94],["SF","Kevin Durant",97],["PF","Rick Barry",95],["C","Wilt Chamberlain",98]]},{"code":"HOU","p":[["PG","James Harden",95],["SG","Tracy McGrady",92],["SF","Clyde Drexler",93],["PF","Hakeem Olajuwon",99],["C","Moses Malone",97]]},{"code":"IND","p":[["PG","Freddie Lewis",89],["SG","Tyrese Haliburton",89],["SF","Paul George",93],["PF","Jermaine O’Neal",91],["C","Mel Daniels",92]]},{"code":"LAC","p":[["PG","Chris Paul",93],["SG","Kawhi Leonard",95],["SF","Paul George",89],["PF","Elton Brand",90],["C","Bob McAdoo",94]]},{"code":"LAL","p":[["PG","Jerry West",97],["SG","Magic Johnson",99],["SF","Kobe Bryant",99],["PF","Elgin Baylor",96],["C","Shaquille O’Neal",99]]},{"code":"MEM","p":[["PG","Mike Conley",88],["SG","Ja Morant",89],["SF","Shareef Abdur-Rahim",86],["PF","Pau Gasol",92],["C","Marc Gasol",93]]},{"code":"MIA","p":[["PG","Tim Hardaway",89],["SG","Dwyane Wade",97],["SF","Jimmy Butler",93],["PF","LeBron James",99],["C","Alonzo Mourning",94]]},{"code":"MIL","p":[["PG","Oscar Robertson",96],["SG","Sidney Moncrief",94],["SF","Giannis Antetokounmpo",97],["PF","Terry Cummings",87],["C","Kareem Abdul-Jabbar",98]]},{"code":"MIN","p":[["PG","Sam Cassell",88],["SG","Anthony Edwards",93],["SF","Tom Gugliotta",88],["PF","Kevin Garnett",98],["C","Kevin Love",91]]},{"code":"NOP","p":[["PG","Chris Paul",97],["SG","Baron Davis",92],["SF","Jamal Mashburn",89],["PF","David West",88],["C","Anthony Davis",94]]},{"code":"NYK","p":[["PG","Jalen Brunson",93],["SG","Walt Frazier",97],["SF","Carmelo Anthony",92],["PF","Patrick Ewing",95],["C","Willis Reed",94]]},{"code":"OKC","p":[["PG","Russell Westbrook",95],["SG","Gary Payton",95],["SF","Shai Gilgeous-Alexander",96],["PF","Kevin Durant",97],["C","Shawn Kemp",90]]},{"code":"ORL","p":[["PG","Penny Hardaway",94],["SG","Tracy McGrady",95],["SF","Paolo Banchero",87],["PF","Shaquille O’Neal",94],["C","Dwight Howard",93]]},{"code":"PHI","p":[["PG","Allen Iverson",96],["SG","Julius Erving",94],["SF","Billy Cunningham",93],["PF","Moses Malone",97],["C","Joel Embiid",95]]},{"code":"PHO","p":[["PG","Steve Nash",96],["SG","Dennis Johnson",94],["SF","Walter Davis",90],["PF","Shawn Marion",91],["C","Amar’e Stoudemire",92]]},{"code":"POR","p":[["PG","Damian Lillard",94],["SG","Brandon Roy",91],["SF","Clyde Drexler",96],["PF","Maurice Lucas",90],["C","Bill Walton",95]]},{"code":"SAC","p":[["PG","Nate Archibald",94],["SG","Oscar Robertson",97],["SF","Mitch Richmond",94],["PF","Chris Webber",93],["C","Jerry Lucas",95]]},{"code":"SAS","p":[["PG","Tony Parker",95],["SG","George Gervin",95],["SF","Kawhi Leonard",95],["PF","Tim Duncan",99],["C","David Robinson",96]]},{"code":"TOR","p":[["PG","Kyle Lowry",89],["SG","DeMar DeRozan",89],["SF","Vince Carter",97],["PF","Kawhi Leonard",96],["C","Chris Bosh",90]]},{"code":"UTA","p":[["PG","John Stockton",97],["SG","Pete Maravich",94],["SF","Adrian Dantley",91],["PF","Karl Malone",97],["C","Mark Eaton",89]]},{"code":"WAS","p":[["PG","Earl Monroe",89],["SG","Gilbert Arenas",93],["SF","Bradley Beal",89],["PF","Elvin Hayes",94],["C","Wes Unseld",94]]}];
   var TK_GUESSES = 3;
   // Spot centres on the court image, in % of its width/height (basket at
   // top; the image is cropped just below the top of the 3-point arc).
@@ -3635,15 +3832,21 @@
     C: { x:65, y:23 }      // right low block
   };
 
-  var tk = { streak:0, bestBefore:0, deck:[], team:null, left:TK_GUESSES, wrong:[], done:false };
+  var tk = { mode:"current", streak:0, bestBefore:0, deck:[], team:null, left:TK_GUESSES, wrong:[], done:false };
 
-  function tkBest(){ return statsLoad().tk.best; }
+  // Current mode = today's starting fives; All-Time = each franchise's
+  // greatest starting five. Stats are kept per mode.
+  function tkBest(){ return statsLoad().tk[statsMode(tk.mode)].best; }
 
   function startTwoKLineup(){
-    statsGameStarted("tk", null);
+    tk.mode = state.mode;
+    statsGameStarted("tk", tk.mode);
     tk.streak = 0;
     tk.bestBefore = tkBest();
-    tk.deck = cpShuffle(TK_TEAMS);
+    tk.deck = cpShuffle(tk.mode === "alltime" ? TK_TEAMS_ALLTIME : TK_TEAMS);
+    document.getElementById("tk-hint").textContent = tk.mode === "alltime"
+      ? "All-time starting fives: name the franchise"
+      : "Name the team from its starting five's 2K ratings";
     document.getElementById("tk-streak").textContent = 0;
     document.getElementById("tk-best").textContent = tk.bestBefore;
     showScreen("screen-tk");
@@ -3675,8 +3878,9 @@
   // Headshots for lineup players who aren't in the Who's Got More lists
   // (Basketball-Reference headshots; 2026 rookies without an NBA game yet
   // have none, so they keep their rating badge).
-  var TK_EXTRA_PHOTOS = {"kyrie irving":"irvinky01","tyrese haliburton":"halibty01","c.j. mccollum":"mccolcj01","nickeil alexander-walker":"alexani01","onyeka okongwu":"okongon01","paul george":"georgpa01","mitchell robinson":"robinmi01","nolan traore":"traorno01","egor demin":"demineg01","noah clowney":"clownno01","moussa diabate":"diabamo01","matas buzelis":"buzelma01","peyton watson":"watsope01","max christie":"chrisma02","p.j. washington":"washipj01","daniel gafford":"gaffoda01","duncan robinson":"robindu01","ausar thompson":"thompau01","john collins":"collijo01","brandin podziemski":"podzibr01","reed sheppard":"sheppre01","andrew nembhard":"nembhan01","kelly oubre jr.":"oubreke01","max strus":"strusma01","rui hachimura":"hachiru01","ziaire williams":"willizi02","jarred vanderbilt":"vandeja01","ty jerome":"jeromty01","cedric coward":"cowarce01","jerami grant":"grantje01","zach edey":"edeyza01","davion mitchell":"mitchda01","tim hardaway jr.":"hardati02","ryan rollins":"rolliry01","caris levert":"leverca01","jaime jaquez jr.":"jaqueja01","ayo dosunmu":"dosunay01","jaden mcdaniels":"mcdanja02","dejounte murray":"murrade01","saddiq bey":"beysa01","derik queen":"queende01","ajay mitchell":"mitchaj01","jalen suggs":"suggsja01","wendell carter jr.":"cartewe01","v.j. edgecombe":"edgecvj01","miles bridges":"bridgmi02","mark williams":"willima07","damian lillard":"lillada01","donovan clingan":"clingdo01","malik monk":"monkma01","de’andre hunter":"huntede01","de’aaron fox":"foxde01","stephon castle":"castlst01","devin vassell":"vassede01","tobias harris":"harrito02","r.j. barrett":"barrerj01","collin murray-boyles":"murraco01","keyonte george":"georgke01","kyle filipowski":"filipky01","tre johnson":"johnstr03","nicolas claxton":"claxtni01","alexandre sarr":"sarral01"};
+  var TK_EXTRA_PHOTOS = {"kyrie irving":"irvinky01","tyrese haliburton":"halibty01","c.j. mccollum":"mccolcj01","nickeil alexander-walker":"alexani01","onyeka okongwu":"okongon01","paul george":"georgpa01","mitchell robinson":"robinmi01","nolan traore":"traorno01","egor demin":"demineg01","noah clowney":"clownno01","moussa diabate":"diabamo01","matas buzelis":"buzelma01","peyton watson":"watsope01","max christie":"chrisma02","p.j. washington":"washipj01","daniel gafford":"gaffoda01","duncan robinson":"robindu01","ausar thompson":"thompau01","john collins":"collijo01","brandin podziemski":"podzibr01","reed sheppard":"sheppre01","andrew nembhard":"nembhan01","kelly oubre jr.":"oubreke01","max strus":"strusma01","rui hachimura":"hachiru01","ziaire williams":"willizi02","jarred vanderbilt":"vandeja01","ty jerome":"jeromty01","cedric coward":"cowarce01","jerami grant":"grantje01","zach edey":"edeyza01","davion mitchell":"mitchda01","tim hardaway jr.":"hardati02","ryan rollins":"rolliry01","caris levert":"leverca01","jaime jaquez jr.":"jaqueja01","ayo dosunmu":"dosunay01","jaden mcdaniels":"mcdanja02","dejounte murray":"murrade01","saddiq bey":"beysa01","derik queen":"queende01","ajay mitchell":"mitchaj01","jalen suggs":"suggsja01","wendell carter jr.":"cartewe01","v.j. edgecombe":"edgecvj01","miles bridges":"bridgmi02","mark williams":"willima07","damian lillard":"lillada01","donovan clingan":"clingdo01","malik monk":"monkma01","de'andre hunter":"huntede01","de'aaron fox":"foxde01","stephon castle":"castlst01","devin vassell":"vassede01","tobias harris":"harrito02","r.j. barrett":"barrerj01","collin murray-boyles":"murraco01","keyonte george":"georgke01","kyle filipowski":"filipky01","tre johnson":"johnstr03","nicolas claxton":"claxtni01","alexandre sarr":"sarral01"};
   function tkPhoto(name){
+    name = name.replace(/\u2019/g, "'");
     var id = CP_PHOTO_IDS[cpNorm(name)] || TK_EXTRA_PHOTOS[cpNorm(name)];
     return id && PHOTOS[id];
   }
@@ -3704,14 +3908,20 @@
     [glow, logo].forEach(function(el){ el.classList.remove("on"); void el.offsetWidth; el.classList.add("on"); });
   }
 
+  var TK_WEST = { DAL:1, DEN:1, GSW:1, HOU:1, LAC:1, LAL:1, MEM:1, MIN:1, NOP:1, OKC:1, PHO:1, POR:1, SAC:1, SAS:1, UTA:1 };
+
+  // Logos go into their conference column; --alpha keeps the one-grid
+  // phone layout in plain alphabetical order.
   function tkRenderLogos(){
-    var box = document.getElementById("tk-logos");
+    var west = document.getElementById("tk-west"), east = document.getElementById("tk-east");
     var sorted = SF_FRANCHISES.slice().sort(function(a, b){ return a.name.localeCompare(b.name); });
-    box.innerHTML = "";
-    sorted.forEach(function(f){
+    west.innerHTML = ""; east.innerHTML = "";
+    sorted.forEach(function(f, i){
+      var box = TK_WEST[f.code] ? west : east;
       var b = document.createElement("button");
       b.type = "button";
       b.className = "tk-logo";
+      b.style.setProperty("--alpha", i);
       b.setAttribute("data-code", f.code);
       b.setAttribute("aria-label", f.name);
       b.innerHTML = sfTeamBadgeHtml(f.code, "");
@@ -3736,7 +3946,7 @@
       tk.done = true;
       tk.streak++;
       var newBest = tk.streak > tkBest();
-      statsUpdate(function(st){ st.tk.named++; st.tk.best = Math.max(st.tk.best, tk.streak); });
+      statsUpdate(function(st){ var m = st.tk[statsMode(tk.mode)]; m.named++; m.best = Math.max(m.best, tk.streak); });
       document.getElementById("tk-streak").textContent = tk.streak;
       document.getElementById("tk-best").textContent = Math.max(tk.streak, tk.bestBefore, tkBest());
       celebrateStreak(newBest, "tk-streak", "tk-best");
@@ -3780,8 +3990,9 @@
   // Play Again / Back to Hub (no separate results screen).
   function tkEndRun(cleared){
     statsUpdate(function(st){
-      statsPush(st.tk.hist, tk.streak);
-      if(cleared) st.tk.perfect++;
+      var m = st.tk[statsMode(tk.mode)];
+      statsPush(m.hist, tk.streak);
+      if(cleared) m.perfect++;
     });
     var newBest = tk.streak > tk.bestBefore;
     var res = document.getElementById("tk-result");
@@ -3811,6 +4022,40 @@
   document.getElementById("tk-hub").addEventListener("click", function(){ showScreen("screen-hub"); });
 
   // ---------------------------------------------------------------
+  // Idle animations (home page, wide computer screens): after IDLE_MS with
+  // no mouse movement, click or key press, a looping shooter (right) and
+  // dribbler (left) appear and keep looping until the mouse moves or a key
+  // is pressed. They only come back after another IDLE_MS of inactivity.
+  // ---------------------------------------------------------------
+  var IDLE_MS = 15000;
+  var idle = { lastActivity: Date.now(), on: false };
+
+  function idleAllowed(){
+    return window.matchMedia && window.matchMedia("(min-width:760px) and (any-hover:hover)").matches &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches &&
+      document.getElementById("screen-hub").classList.contains("active") && !document.hidden;
+  }
+  function idleStop(){
+    idle.on = false;
+    document.body.classList.remove("idle-on");
+  }
+  function idleStart(){
+    idle.on = true;
+    document.body.classList.add("idle-on");
+  }
+  function idleActivity(){
+    idle.lastActivity = Date.now();
+    if(idle.on) idleStop();
+  }
+  ["mousemove", "mousedown", "keydown", "touchstart"].forEach(function(ev){
+    window.addEventListener(ev, idleActivity, { passive: true });
+  });
+  setInterval(function(){
+    if(idle.on){ if(!idleAllowed()) idleStop(); return; }
+    if(idleAllowed() && Date.now() - idle.lastActivity >= IDLE_MS) idleStart();
+  }, 500);
+
+  // ---------------------------------------------------------------
   // My Stats: lifetime numbers for each game, kept in this browser only
   // (localStorage). Who's Got More and Career Path are split by Current /
   // All-Time; the page shows whichever mode the switch is on. Starting
@@ -3823,12 +4068,13 @@
   function statsBlank(){
     function ml(){ return { best:0, games:0, correct:0, misses:0, hist:[], cats:{} }; }
     function cpm(){ return { best:0, games:0, named:0, perfect:0, hints:0, guesses:0, attempted:0, hist:[], stumps:{} }; }
+    function tkm(){ return { best:0, games:0, named:0, perfect:0, hist:[] }; }
     return {
       ml: { current: ml(), alltime: ml() },
       sf: { games:0, bestPct:0, bestTotal:0, totalPct:0, perfect:0, hist:[], bestLineup:null },
       cp: { current: cpm(), alltime: cpm() },
       grid: { played:0, completed:0, squares:0 },
-      tk: { best:0, games:0, named:0, perfect:0, hist:[] },
+      tk: { current: tkm(), alltime: tkm() },
       days: { last:null, streak:0, best:0 },
       migrated: false
     };
@@ -3848,8 +4094,13 @@
   }
 
   function statsLoad(){
-    var st = statsBlank();
-    try{ statsMerge(st, JSON.parse(localStorage.getItem(STATS_KEY))); }catch(e){}
+    var st = statsBlank(), saved = null;
+    try{ saved = JSON.parse(localStorage.getItem(STATS_KEY)); statsMerge(st, saved); }catch(e){}
+    // 2K Lineup used one set of stats before it had modes: those were Current.
+    if(saved && saved.tk && typeof saved.tk.best === "number"){
+      ["best","games","named","perfect"].forEach(function(k){ if(typeof saved.tk[k] === "number") st.tk.current[k] = saved.tk[k]; });
+      if(Array.isArray(saved.tk.hist)) st.tk.current.hist = saved.tk.hist;
+    }
     // Saves from before career high was tracked: use the best lineup's total.
     if(!st.sf.bestTotal && st.sf.bestLineup) st.sf.bestTotal = st.sf.bestLineup.total || 0;
     if(!st.migrated){
@@ -4016,7 +4267,7 @@
     var mode = statsMode(state.mode);
     var modeName = mode === "alltime" ? "All-Time" : "Current";
     var ml = st.ml[mode], cpm = st.cp[mode], sf = st.sf;
-    var totalGames = st.ml.current.games + st.ml.alltime.games + sf.games + st.cp.current.games + st.cp.alltime.games + st.grid.played + st.tk.games;
+    var totalGames = st.ml.current.games + st.ml.alltime.games + sf.games + st.cp.current.games + st.cp.alltime.games + st.grid.played + st.tk.current.games + st.tk.alltime.games;
     var dayStreak = statsDayStreak(st);
 
     var iq = statsHoopIQ(st);
@@ -4088,13 +4339,13 @@
         statTile(st.grid.played ? Math.round(st.grid.completed / st.grid.played * 100) + "%" : "–", "Completion rate") +
         statTile(st.grid.played ? statsRound(st.grid.squares / st.grid.played) : "–", "Avg squares") +
       '</div>') +
-      statsCard("05", "2K Lineup", '<div class="stats-grid">' +
-        statTile(st.tk.best, "Best streak") +
-        statTile(st.tk.named, "Teams named") +
-        statTile(st.tk.games, "Games") +
-        statTile(st.tk.perfect, "Perfect runs") +
+      statsCard("05", "2K Lineup <small>" + modeName + "</small>", '<div class="stats-grid">' +
+        statTile(st.tk[mode].best, "Best streak") +
+        statTile(st.tk[mode].named, "Teams named") +
+        statTile(st.tk[mode].games, "Games") +
+        statTile(st.tk[mode].perfect, "Perfect runs") +
       '</div><div class="chart-title">Streaks, last ' + STATS_HISTORY + ' runs</div>' +
-      statsBars(st.tk.hist, 5, function(v){ return String(v); }, "run"));
+      statsBars(st.tk[mode].hist, 5, function(v){ return String(v); }, "run"));
   }
 
   // The stats button toggles: tap again on the stats page to go home.
