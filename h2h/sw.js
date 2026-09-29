@@ -1,12 +1,12 @@
 // Service worker: network-first for the app shell (always fresh when online, works offline),
 // cache-first for logos and icons (they never change between releases).
 // Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v16';
+const VERSION = 'h2h-v18';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'css/tokens.css', 'css/app.css',
   'js/app.js', 'js/ui.js', 'js/api.js', 'js/demo.js', 'js/store.js', 'js/lock.js', 'js/stats.js', 'js/teams.js', 'js/sample.js', 'js/crypto.js', 'js/chart.js',
-  'assets/icons/icon-192.png', 'assets/icons/apple-touch-icon.png', 'assets/icons/favicon.svg',
+  'assets/icons/icon-192.png', 'assets/icons/apple-touch-icon.png',
 ];
 const TEAMS = ['atl','bos','bkn','cha','chi','cle','dal','den','det','gsw','hou','ind','lac','lal','mem',
   'mia','mil','min','nop','nyk','okc','orl','phi','phx','por','sac','sas','tor','uta','was'];

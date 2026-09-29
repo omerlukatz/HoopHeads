@@ -71,7 +71,7 @@ function show(screen, sub) {
     if (el.dataset.nav === screen) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   }
-  document.title = `${{ dashboard: 'Dashboard', history: 'History', friends: 'Friends', settings: 'Settings' }[screen]} · H2H`;
+  document.title = `${{ dashboard: 'Dashboard', history: 'History', friends: 'Friends', settings: 'Settings' }[screen]} · Dubs`;
   if (screen === 'friends') showProfilePage(sub === undefined ? fp.userId : sub);
   const target = screen === 'friends' && fp.userId ? `friends/${fp.userId}` : screen;
   if (location.hash.slice(1) !== target) history.replaceState(history.state, '', `#${target}`);
@@ -651,7 +651,7 @@ function renderSettings() {
   </section>`
       : ''
   }
-  <p class="group__foot group__foot--center">H2H 2.0 · ${isDemo ? 'Demo mode' : 'Synced with Google Sheets'}</p>`;
+  <p class="group__foot group__foot--center">Dubs 2.0 · ${isDemo ? 'Demo mode' : 'Synced with Google Sheets'}</p>`;
 }
 
 function initSettings() {
@@ -803,12 +803,12 @@ async function exportGames() {
     friends: state.friends,
     games: state.games.map(({ _pending, ...g }) => g),
   };
-  const name = `h2h-games-${todayISO()}.json`;
+  const name = `dubs-games-${todayISO()}.json`;
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const file = new File([blob], name, { type: 'application/json' });
   if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: 'H2H games' });
+      await navigator.share({ files: [file], title: 'Dubs games' });
       return;
     } catch (err) {
       if (err.name === 'AbortError') return;
@@ -1158,7 +1158,7 @@ function showProfilePage(userId) {
     scroller.scrollTop = fp.listScroll;
     return;
   }
-  document.title = `${isMe ? 'My Profile' : friend.display_name} · H2H`;
+  document.title = `${isMe ? 'My Profile' : friend.display_name} · Dubs`;
   if (fp.userId === userId) return; // already showing it (e.g. back from another tab)
   if (!fp.userId) fp.listScroll = scroller.scrollTop;
   Object.assign(fp, { userId, sel: null, data: store.cachedProfile(userId), error: null, trend: { metric: 'winPct', range: 'All' } });
@@ -1521,7 +1521,7 @@ function renderFriends() {
   if (!el || ui.searching) return;
   const invite = `<section class="group" aria-labelledby="invite-title">
     <div class="group__head"><h2 id="invite-title">Invite</h2></div>
-    <ul class="list" role="list"><li><button type="button" class="cell cell--button" data-action="invite">${icon('export')}<span>Share H2H</span></button></li></ul>
+    <ul class="list" role="list"><li><button type="button" class="cell cell--button" data-action="invite">${icon('export')}<span>Share Dubs</span></button></li></ul>
     <p class="group__foot">Send friends the link. Once they sign up, search for them here and tap Add.</p>
   </section>`;
   if (!state.friends.length) {
@@ -1666,11 +1666,11 @@ async function openFriendOptions(friendId) {
 async function shareInvite() {
   const url = new URL('./', location.href).href;
   const me = state.me;
-  const text = `Let’s track our NBA 2K games on H2H.${me ? ` Add me: @${me.username}` : ''}`;
+  const text = `Let’s track our NBA 2K games on Dubs.${me ? ` Add me: @${me.username}` : ''}`;
   haptic('light');
   if (navigator.share) {
     try {
-      await navigator.share({ title: 'H2H', text, url });
+      await navigator.share({ title: 'Dubs', text, url });
       return;
     } catch (err) {
       if (err.name === 'AbortError') return;

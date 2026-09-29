@@ -87,7 +87,7 @@ function renderWelcome(message = '') {
   const view = swap(`
     <div class="lock__center">
       <img class="lock__icon" src="assets/icons/icon-192.png" alt="" width="64" height="64">
-      <h1 class="lock__title">H2H</h1>
+      <h1 class="lock__title">Dubs</h1>
       <p class="lock__sub">Your 2K rivalries, tracked.</p>
       ${message ? `<p class="lock__notice" role="status">${esc(message)}</p>` : ''}
       ${

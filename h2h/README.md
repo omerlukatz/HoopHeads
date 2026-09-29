@@ -1,4 +1,4 @@
-# H2H — NBA 2K head-to-head tracker
+# Dubs — NBA 2K head-to-head tracker
 
 An installable web app for tracking NBA 2K rivalries with your friends:
 
@@ -86,6 +86,8 @@ js/teams.js             The single teams data file (name, city, nickname, abbr, 
 js/sample.js            Deterministic sample games for demo mode
 assets/logos/           30 normalized 256×256 transparent WebP logos (abbr.webp)
 tools/process_logos.py  Re-runnable logo pipeline (originals → assets/logos)
+tools/process_icon.py   App icons, favicon and link-preview image from tools/logo-source.webp
+tools/process_avatars.py Profile pictures (~/Desktop/H2H-Avatars → assets/avatars)
 tools/logo-sources/     Renamed copies of the original logo files
 ```
 

@@ -1,7 +1,7 @@
 {
-  "name": "H2H — 2K Head-to-Head",
-  "short_name": "H2H",
-  "description": "Log NBA 2K games against your friend and track the record.",
+  "name": "Dubs — NBA 2K Rivalries",
+  "short_name": "Dubs",
+  "description": "Log every NBA 2K game against your friends and see who’s really better.",
   "start_url": "./#dashboard",
   "scope": "./",
   "display": "standalone",
