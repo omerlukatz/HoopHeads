@@ -3,7 +3,7 @@ import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams } from './stats.js';
-import { showLock, isLocked, avatar } from './lock.js';
+import { showLock, isLocked, avatar, changePinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -91,6 +91,8 @@ document.addEventListener('click', (e) => {
     haptic('light');
   }
   else if (name === 'add-friend') addFriend(id, action);
+  else if (name === 'friend-options') openFriendOptions(id);
+  else if (name === 'invite') shareInvite();
 });
 
 // "N" logs a new game on desktop keyboards
@@ -393,11 +395,13 @@ function renderSettings() {
   <section class="group" aria-labelledby="set-account">
     <div class="group__head"><h2 id="set-account">Account</h2></div>
     <ul class="list" role="list">
-      <li class="cell cell--profile">${avatar(me, 'md')}<span class="cell__stack"><span class="cell__title">${esc(meName())}</span><span class="cell__sub">@${esc(me?.username || '')} · ${state.friends.length} ${state.friends.length === 1 ? 'friend' : 'friends'}</span></span></li>
+      <li><button type="button" class="cell cell--button cell--profile" id="profile-btn" aria-label="Edit profile: ${esc(meName())}, @${esc(me?.username || '')}">${avatar(me, 'md')}<span class="cell__stack"><span class="cell__title">${esc(meName())}</span><span class="cell__sub">@${esc(me?.username || '')} · ${state.friends.length} ${state.friends.length === 1 ? 'friend' : 'friends'}</span></span><span class="cell__value">Edit</span><svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button></li>
+      <li><button type="button" class="cell cell--button" id="pin-btn">${icon('key')}<span>Change PIN</span></button></li>
+      <li><button type="button" class="cell cell--button" id="blocked-btn">${icon('block')}<span>Blocked Users</span></button></li>
       <li class="cell"><label for="require-pin">Require PIN on Open</label><input type="checkbox" role="switch" class="switch" id="require-pin"${prefs.requirePin ? ' checked' : ''}></li>
       <li><button type="button" class="cell cell--button cell--destructive" id="signout-btn">Sign Out</button></li>
     </ul>
-    <p class="group__foot">You stay signed in on this device. Turn on Require PIN to be asked for it each time the app opens.</p>
+    <p class="group__foot">You stay signed in on this device. Changing your PIN signs you out everywhere else. Turn on Require PIN to be asked for it each time the app opens.</p>
   </section>
 
   <section class="group" aria-labelledby="set-sync">
@@ -457,6 +461,73 @@ function initSettings() {
     }
     if (id === 'export-btn') exportGames();
     if (id === 'signout-btn') confirmSignOut();
+    if (id === 'profile-btn') openProfileSheet();
+    if (id === 'pin-btn') changePin();
+    if (id === 'blocked-btn') openBlockedSheet();
+  });
+}
+
+async function changePin() {
+  if (!navigator.onLine) return toast('You’re offline. Changing your PIN needs a connection.');
+  if (await changePinFlow()) {
+    haptic('success');
+    toast('PIN changed. Other devices were signed out.');
+  }
+}
+
+function openProfileSheet() {
+  if (document.documentElement.classList.contains('has-modal')) return;
+  const me = state.me;
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  content.innerHTML = `
+    <header class="sheet__header">
+      <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
+      <h2 id="profile-title" class="sheet__title">Edit Profile</h2>
+      <button type="submit" form="profile-form" class="btn-text btn-text--strong" data-sheet="save">Save</button>
+    </header>
+    <form id="profile-form" class="sheet__body profile-form" novalidate autocomplete="off">
+      <div class="profile-form__avatar">${avatar(me, 'xl')}</div>
+      <ul class="list list--form" role="list">
+        <li class="cell"><label for="pf-name">Name</label><input id="pf-name" name="displayName" class="cell__input" value="${esc(me.display_name)}" maxlength="24" autocomplete="nickname" enterkeyhint="next" required></li>
+        <li class="cell"><label for="pf-username">Username</label><span class="cell__input-group"><span class="cell__prefix" aria-hidden="true">@</span><input id="pf-username" name="username" class="cell__input" value="${esc(me.username)}" maxlength="20" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" required></span></li>
+      </ul>
+      <p class="auth-help">Usernames are 3–20 letters, numbers, dots or underscores. Friends can find you by either one.</p>
+      <p class="auth-error" role="alert"></p>
+    </form>`;
+  const form = $('form', content);
+  const err = $('.auth-error', content);
+  const avatarEl = $('.profile-form__avatar .avatar', content);
+  form.username.addEventListener('input', () => {
+    form.username.value = form.username.value.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+  });
+  form.displayName.addEventListener('input', () => (avatarEl.textContent = (form.displayName.value.trim()[0] || '?').toUpperCase()));
+
+  const sheet = openSheet({ content, labelledBy: 'profile-title', initialFocus: '#pf-name' });
+  content.addEventListener('click', (e) => e.target.closest('[data-sheet="cancel"]') && sheet.close());
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const displayName = form.displayName.value.trim().replace(/\s+/g, ' ');
+    const username = form.username.value.trim();
+    if (!displayName) return (err.textContent = 'Enter your name.');
+    if (!/^[a-z0-9_.]{3,20}$/.test(username)) return (err.textContent = 'Usernames are 3–20 letters, numbers, dots or underscores.');
+    const patch = {};
+    if (displayName !== me.display_name) patch.displayName = displayName;
+    if (username !== me.username) patch.username = username;
+    if (!Object.keys(patch).length) return sheet.close();
+    const save = $('[data-sheet="save"]', content);
+    save.disabled = true;
+    err.textContent = '';
+    try {
+      await store.updateProfile(patch);
+      haptic('success');
+      sheet.close();
+      toast(patch.username ? `You’re now @${username}` : 'Profile updated');
+    } catch (ex) {
+      haptic('warning');
+      err.textContent = ex.code === 'network' ? 'You’re offline. Try again when you’re connected.' : ex.message;
+      save.disabled = false;
+    }
   });
 }
 
@@ -839,33 +910,38 @@ function friendRecord(friendId) {
   return record(views(store.pairGames(friendId), meId()));
 }
 
-function friendRow(f, { chevron = true } = {}) {
+function friendRow(f, { chevron = true, more = false } = {}) {
   const r = friendRecord(f.id);
   const current = f.id === state.rivalId;
-  return `<li><button type="button" class="cell cell--button friend-row" data-action="open-rival" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} Open rivalry">
+  return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="open-rival" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} Open rivalry">
     ${avatar(f, 'md')}
     <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
     <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
-    ${current ? icon('check', 'friend-row__check') : chevron ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
-  </button></li>`;
+    ${current ? icon('check', 'friend-row__check') : chevron && !more ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
+  </button>${more ? `<button type="button" class="friend-more" data-action="friend-options" data-id="${esc(f.id)}" aria-label="More options for ${esc(f.display_name)}">${icon('more')}</button>` : ''}</li>`;
 }
 
 function renderFriends() {
   const el = $('#friends-list');
   if (!el || ui.searching) return;
+  const invite = `<section class="group" aria-labelledby="invite-title">
+    <div class="group__head"><h2 id="invite-title">Invite</h2></div>
+    <ul class="list" role="list"><li><button type="button" class="cell cell--button" data-action="invite">${icon('export')}<span>Share H2H</span></button></li></ul>
+    <p class="group__foot">Send friends the link. Once they sign up, search for them here and tap Add.</p>
+  </section>`;
   if (!state.friends.length) {
     el.innerHTML = `<div class="empty empty--compact">
       <span class="empty__icon">${icon('people')}</span>
       <p class="empty__text">Search by name or username to add your first friend.</p>
-    </div>`;
+    </div>${invite}`;
     return;
   }
   const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
   el.innerHTML = `<section class="group" aria-labelledby="friends-title">
     <div class="group__head"><h2 id="friends-title">Your Friends</h2><span class="group__record">${sorted.length}</span></div>
-    <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f)).join('')}</ul>
-    <p class="group__foot">Tap a friend to open your rivalry.</p>
-  </section>`;
+    <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f, { more: true })).join('')}</ul>
+    <p class="group__foot">Tap a friend to open your rivalry. Tap ⋯ to remove or block.</p>
+  </section>${invite}`;
 }
 
 function searchRow(u) {
@@ -948,6 +1024,108 @@ async function addFriend(userId, button) {
       button.textContent = 'Add';
     }
   }
+}
+
+async function openFriendOptions(friendId) {
+  const f = state.friends.find((x) => x.id === friendId);
+  if (!f) return;
+  haptic('light');
+  const choice = await alertDialog({
+    title: f.display_name,
+    message: `@${f.username}`,
+    actions: [
+      { label: 'Remove Friend', value: 'remove', style: 'destructive' },
+      { label: `Block @${f.username}`, value: 'block', style: 'destructive' },
+      { label: 'Cancel', value: null, style: 'cancel' },
+    ],
+  });
+  if (!choice) return;
+  const block = choice === 'block';
+  const sure = await alertDialog({
+    title: block ? `Block ${f.display_name}?` : `Remove ${f.display_name}?`,
+    message: block
+      ? `You’ll stop being friends, and ${f.display_name} won’t be able to find or add you. You can unblock them in Settings.`
+      : `You’ll stop being friends on both sides. Your games are kept and come back if you add each other again.`,
+    actions: [
+      { label: 'Cancel', value: false, style: 'cancel' },
+      { label: block ? 'Block' : 'Remove', value: true, style: 'destructive' },
+    ],
+  });
+  if (!sure) return;
+  try {
+    if (block) await store.blockUser(f.id);
+    else await store.removeFriend(f.id);
+    haptic('success');
+    toast(block ? `Blocked ${f.display_name}` : `Removed ${f.display_name}`);
+  } catch (err) {
+    haptic('warning');
+    toast(err.code === 'network' ? 'You’re offline. Try again when you’re connected.' : err.message);
+  }
+}
+
+async function shareInvite() {
+  const url = new URL('./', location.href).href;
+  const me = state.me;
+  const text = `Let’s track our NBA 2K games on H2H.${me ? ` Add me: @${me.username}` : ''}`;
+  haptic('light');
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'H2H', text, url });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    toast('Invite link copied');
+  } catch {
+    toast(url);
+  }
+}
+
+async function openBlockedSheet() {
+  if (document.documentElement.classList.contains('has-modal')) return;
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  content.innerHTML = `
+    <header class="sheet__header">
+      <span></span>
+      <h2 id="blocked-title" class="sheet__title">Blocked Users</h2>
+      <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
+    </header>
+    <div class="sheet__body"><p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading…</p></div>`;
+  const body = $('.sheet__body', content);
+  const sheet = openSheet({ content, labelledBy: 'blocked-title' });
+  const paint = (users) => {
+    body.innerHTML = users.length
+      ? `<ul class="list list--friends list--sheet" role="list">${users
+          .map(
+            (u) => `<li class="cell friend-result">${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${esc(u.display_name)}</span><span class="cell__sub">@${esc(u.username)}</span></span>
+              <button type="button" class="chip chip--done" data-unblock="${esc(u.id)}" aria-label="Unblock ${esc(u.display_name)}">Unblock</button></li>`,
+          )
+          .join('')}</ul><p class="group__foot">Unblocking doesn’t re-add them as a friend.</p>`
+      : '<p class="search-note">You haven’t blocked anyone.</p>';
+  };
+  try {
+    paint(await store.getBlocked());
+  } catch (err) {
+    body.innerHTML = `<p class="search-note">${err.code === 'network' ? 'You’re offline. This needs a connection.' : esc(err.message)}</p>`;
+  }
+  content.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-sheet="done"]')) return sheet.close();
+    const btn = e.target.closest('[data-unblock]');
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      await store.unblockUser(btn.dataset.unblock);
+      haptic('light');
+      paint(await store.getBlocked());
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message);
+    }
+  });
 }
 
 function openRivalSwitcher() {

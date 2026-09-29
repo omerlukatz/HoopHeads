@@ -183,6 +183,26 @@ export function signOut({ expired = false } = {}) {
   emit({ session: true, expired });
 }
 
+/** Change name and/or username. Needs a connection. */
+export async function updateProfile(patch) {
+  const user = await api.updateProfile(state.session.token, patch);
+  const oldId = state.me?.id;
+  state.me = user;
+  if (oldId) forgetAccount(oldId);
+  rememberAccount(user);
+  persistCache();
+  emit({ profile: true });
+  return user;
+}
+
+/** Change PIN. Other devices are signed out; this one gets a fresh session token. */
+export async function changePin(currentPin, newPin) {
+  const { token } = await api.changePin(state.session.token, currentPin, newPin);
+  state.session = { ...state.session, token };
+  write(K.session, state.session);
+  setPrefs({ pinHash: await sha256(`${token}:${newPin}`) });
+}
+
 // ---------- friends ----------
 
 export const searchUsers = (query) => api.searchUsers(state.session.token, query);
@@ -196,6 +216,29 @@ export async function addFriend(userId) {
   emit({ friends: true, rival: true });
   return friend;
 }
+
+function dropFriend(userId) {
+  state.friends = state.friends.filter((f) => f.id !== userId);
+  if (state.rivalId === userId) state.rivalId = null;
+  pickRival();
+  persistCache();
+  emit({ friends: true, rival: true });
+}
+
+/** Ends the friendship on both sides. Games are kept (they come back if you re-add each other). */
+export async function removeFriend(userId) {
+  await api.removeFriend(state.session.token, userId);
+  dropFriend(userId);
+}
+
+/** Removes the friendship and stops them from finding or adding you. */
+export async function blockUser(userId) {
+  await api.blockUser(state.session.token, userId);
+  dropFriend(userId);
+}
+
+export const unblockUser = (userId) => api.unblockUser(state.session.token, userId);
+export const getBlocked = () => api.getBlocked(state.session.token);
 
 // ---------- writes (optimistic) ----------
 

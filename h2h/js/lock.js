@@ -225,6 +225,72 @@ function renderCreatePin(values, message = '') {
   });
 }
 
+// ---------- change PIN (from Settings) ----------
+
+/** Current PIN → new PIN → confirm, checked by the server. Resolves true if the PIN changed. */
+export function changePinFlow() {
+  const el = root();
+  el.classList.add('is-shown');
+  el.getBoundingClientRect();
+  el.classList.add('is-visible');
+  document.getElementById('app').inert = true;
+  let changed = false;
+  const cancel = { label: 'Cancel', fn: () => hideLock() };
+  const user = store.state.me;
+
+  const current = (message = '') =>
+    renderPin({
+      user,
+      title: 'Current PIN',
+      subtitle: 'Enter the PIN you use now.',
+      message,
+      leave: cancel,
+      onPin: async (currentPin) => (next(currentPin), 'handled'),
+    });
+  const next = (currentPin, message = '') =>
+    renderPin({
+      user,
+      title: 'New PIN',
+      subtitle: 'Choose 4 new digits.',
+      message,
+      leave: cancel,
+      onPin: async (newPin) => {
+        if (newPin === currentPin) return next(currentPin, 'Pick a PIN that’s different from your current one.'), 'handled';
+        confirm(currentPin, newPin);
+        return 'handled';
+      },
+    });
+  const confirm = (currentPin, newPin) =>
+    renderPin({
+      user,
+      title: 'Confirm New PIN',
+      subtitle: 'Enter the new PIN again.',
+      leave: cancel,
+      onPin: async (again) => {
+        if (again !== newPin) {
+          haptic('warning');
+          next(currentPin, 'The PINs didn’t match. Try again.');
+          return 'handled';
+        }
+        try {
+          await store.changePin(currentPin, newPin);
+          changed = true;
+          return 'done';
+        } catch (e) {
+          if (e.code === 'wrong_pin') {
+            haptic('warning');
+            current(`${e.message}${e.triesLeft ? ` ${e.triesLeft} ${e.triesLeft === 1 ? 'try' : 'tries'} left.` : ''}`);
+            return 'handled';
+          }
+          throw e;
+        }
+      },
+    });
+
+  current();
+  return new Promise((resolve) => (resolveUnlock = () => resolve(changed)));
+}
+
 // ---------- "Require PIN on open" ----------
 
 function renderLocalPin(message = '') {

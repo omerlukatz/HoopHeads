@@ -6,6 +6,7 @@
  * Tabs
  *   Users:       id, username, display_name, pin_hash, color, initial, created_at
  *   Friendships: id, user_a, user_b, created_at
+ *   Blocks:      id, blocker, blocked, created_at
  *   Games:       id, date, player1_id, player2_id, player1_score, player2_score, player1_team,
  *                player2_team, overtime, note, created_by, created_at, updated_at, deleted
  *
@@ -14,10 +15,16 @@
  *   GET  ?action=friends&token=...             -> your friends
  *   GET  ?action=search&token=...&q=...        -> users matching a name or username
  *   GET  ?action=games&token=...               -> every non-deleted game you played in
+ *   GET  ?action=blocked&token=...             -> users you've blocked
  *   POST { action: 'signUp', username, displayName, pin }  -> { token, user }
  *   POST { action: 'signIn', username, pin }               -> { token, user }
  *   POST { action: 'signOut', token }                      -> {}
+ *   POST { action: 'updateProfile', token, username?, displayName? } -> user
+ *   POST { action: 'changePin', token, currentPin, newPin }  -> { token } (other devices are signed out)
  *   POST { action: 'addFriend', token, userId }            -> friend (instant; safe to repeat)
+ *   POST { action: 'removeFriend', token, userId }         -> {} (games are kept)
+ *   POST { action: 'blockUser', token, userId }            -> {} (also removes the friendship)
+ *   POST { action: 'unblockUser', token, userId }          -> {}
  *   POST { action: 'addGame', token, game }                -> game (idempotent by id: safe to retry)
  *   POST { action: 'updateGame', token, game }             -> game (also un-deletes)
  *   POST { action: 'deleteGame', token, id }               -> { id } (soft delete: deleted = TRUE)
@@ -36,6 +43,7 @@
 const SHEETS = {
   Users: ['id', 'username', 'display_name', 'pin_hash', 'color', 'initial', 'created_at'],
   Friendships: ['id', 'user_a', 'user_b', 'created_at'],
+  Blocks: ['id', 'blocker', 'blocked', 'created_at'],
   Games: ['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score', 'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at', 'updated_at', 'deleted'],
 };
 const TEAMS = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK', 'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS'];
@@ -50,7 +58,7 @@ const SESSION_DAYS = 180;
  * ONE-TIME HELPERS: pick one in the editor's function dropdown and click Run
  * ===================================================================== */
 
-/** Creates the Users, Friendships and Games tabs with the right headers. Safe to run again. */
+/** Creates the Users, Friendships, Blocks and Games tabs with the right headers. Safe to run again. */
 function setupSheet() {
   const ss = SpreadsheetApp.getActive();
   Object.keys(SHEETS).forEach(function (name) {
@@ -105,6 +113,7 @@ function doGet(e) {
       case 'friends': return listFriends_(me.id);
       case 'search': return searchUsers_(me.id, p.q);
       case 'games': return listGames_(me.id);
+      case 'blocked': return listBlocked_(me.id);
       default: throw apiError_('Unknown action.', 'invalid');
     }
   });
@@ -118,7 +127,12 @@ function doPost(e) {
       case 'signUp': return signUp_(body.username, body.displayName, body.pin);
       case 'signIn': return signIn_(body.username, body.pin);
       case 'signOut': return signOut_(body.token);
+      case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName);
+      case 'changePin': return changePin_(requireSession_(body.token), body.currentPin, body.newPin);
       case 'addFriend': return addFriend_(requireSession_(body.token), body.userId);
+      case 'removeFriend': return removeFriend_(requireSession_(body.token), body.userId);
+      case 'blockUser': return blockUser_(requireSession_(body.token), body.userId);
+      case 'unblockUser': return unblockUser_(requireSession_(body.token), body.userId);
       case 'addGame': return addGame_(requireSession_(body.token), body.game);
       case 'updateGame': return updateGame_(requireSession_(body.token), body.game);
       case 'deleteGame': return deleteGame_(requireSession_(body.token), body.id);
@@ -180,6 +194,56 @@ function signIn_(username, pin) {
     props.deleteProperty(key);
     pruneSessions_();
     return { token: newSession_(found.user.id), user: publicUser_(found.user) };
+  });
+}
+
+function updateProfile_(me, username, displayName) {
+  return withLock_(function () {
+    const found = findUserByUsername_(me.username);
+    if (!found) throw apiError_('This account no longer exists.', 'auth');
+    const next = Object.assign({}, found.user);
+    if (username != null) {
+      const name = String(username).trim().toLowerCase().replace(/^@/, '');
+      if (!/^[a-z0-9_.]{3,20}$/.test(name)) throw apiError_('Usernames are 3–20 letters, numbers, dots or underscores.', 'invalid');
+      const taken = findUserByUsername_(name);
+      if (taken && taken.user.id !== me.id) throw apiError_('That username is taken.', 'taken');
+      next.username = name;
+    }
+    if (displayName != null) {
+      const display = String(displayName).trim().replace(/\s+/g, ' ');
+      if (!display || display.length > 24) throw apiError_('Enter a name up to 24 characters.', 'invalid');
+      next.display_name = display;
+      next.initial = display.charAt(0).toUpperCase();
+    }
+    writeRow_(sheet_('Users'), found.row, next);
+    return publicUser_(next);
+  });
+}
+
+function changePin_(me, currentPin, newPin) {
+  if (!/^\d{4}$/.test(String(newPin))) throw apiError_('Your new PIN must be 4 digits.', 'invalid');
+  return withLock_(function () {
+    const props = PropertiesService.getScriptProperties();
+    const key = 'fails:' + me.username;
+    const fails = JSON.parse(props.getProperty(key) || '{"count":0,"lockedUntil":0}');
+    if (fails.lockedUntil > Date.now()) {
+      throw apiError_('Too many attempts.', 'locked', { retryAfter: Math.ceil((fails.lockedUntil - Date.now()) / 1000) });
+    }
+    if (hash_(me.id, String(currentPin)) !== me.pin_hash) {
+      fails.count += 1;
+      if (fails.count >= MAX_TRIES) {
+        props.setProperty(key, JSON.stringify({ count: 0, lockedUntil: Date.now() + LOCK_MINUTES * 60000 }));
+        throw apiError_('Too many attempts.', 'locked', { retryAfter: LOCK_MINUTES * 60 });
+      }
+      props.setProperty(key, JSON.stringify(fails));
+      throw apiError_('Your current PIN is wrong.', 'wrong_pin', { triesLeft: MAX_TRIES - fails.count });
+    }
+    props.deleteProperty(key);
+    const found = findUserByUsername_(me.username);
+    const sheet = sheet_('Users');
+    sheet.getRange(found.row, colIndex_(sheet, 'pin_hash')).setNumberFormat('@').setValue(hash_(me.id, String(newPin)));
+    endSessionsFor_(me.id); // sign out every other device
+    return { token: newSession_(me.id) };
   });
 }
 
@@ -269,9 +333,10 @@ function searchUsers_(userId, query) {
   const q = String(query || '').trim().toLowerCase().replace(/^@/, '');
   if (q.length < 2) return [];
   const friends = friendIds_(userId);
+  const hidden = blockedEitherWay_(userId);
   return readObjects_(sheet_('Users'))
     .filter(function (u) {
-      return u.id !== userId && (String(u.username).toLowerCase().indexOf(q) !== -1 || String(u.display_name).toLowerCase().indexOf(q) !== -1);
+      return u.id !== userId && hidden.indexOf(u.id) === -1 && (String(u.username).toLowerCase().indexOf(q) !== -1 || String(u.display_name).toLowerCase().indexOf(q) !== -1);
     })
     .slice(0, 20)
     .map(function (u) { return Object.assign(publicUser_(u), { isFriend: friends.indexOf(u.id) !== -1 }); });
@@ -281,12 +346,62 @@ function addFriend_(me, userId) {
   if (!userId || userId === me.id) throw apiError_('Pick someone else to add.', 'invalid');
   const other = readObjects_(sheet_('Users')).find(function (u) { return u.id === userId; });
   if (!other) throw apiError_('That user no longer exists.', 'invalid');
+  if (blockedEitherWay_(me.id).indexOf(userId) !== -1) throw apiError_('You can’t add this person.', 'invalid');
   return withLock_(function () {
     if (friendIds_(me.id).indexOf(userId) === -1) {
       const pair = [me.id, userId].sort();
       appendRow_(sheet_('Friendships'), { id: Utilities.getUuid(), user_a: pair[0], user_b: pair[1], created_at: new Date().toISOString() });
     }
     return publicUser_(other);
+  });
+}
+
+/** Deletes the friendship row between two users, if any. Games between them are kept. */
+function deleteFriendship_(a, b) {
+  const sheet = sheet_('Friendships');
+  const rows = readRows_(sheet).filter(function (r) {
+    return (r.data.user_a === a && r.data.user_b === b) || (r.data.user_a === b && r.data.user_b === a);
+  });
+  rows.reverse().forEach(function (r) { sheet.deleteRow(r.row); }); // bottom-up keeps row numbers valid
+}
+
+function removeFriend_(me, userId) {
+  return withLock_(function () {
+    deleteFriendship_(me.id, userId);
+    return {};
+  });
+}
+
+/** Users blocked by, or blocking, this user: neither side can find or add the other. */
+function blockedEitherWay_(userId) {
+  return readObjects_(sheet_('Blocks'))
+    .filter(function (b) { return b.blocker === userId || b.blocked === userId; })
+    .map(function (b) { return b.blocker === userId ? b.blocked : b.blocker; });
+}
+
+function listBlocked_(userId) {
+  const ids = readObjects_(sheet_('Blocks')).filter(function (b) { return b.blocker === userId; }).map(function (b) { return b.blocked; });
+  return readObjects_(sheet_('Users')).filter(function (u) { return ids.indexOf(u.id) !== -1; }).map(publicUser_);
+}
+
+function blockUser_(me, userId) {
+  if (!userId || userId === me.id) throw apiError_('Pick someone else to block.', 'invalid');
+  return withLock_(function () {
+    deleteFriendship_(me.id, userId);
+    const already = readObjects_(sheet_('Blocks')).some(function (b) { return b.blocker === me.id && b.blocked === userId; });
+    if (!already) appendRow_(sheet_('Blocks'), { id: Utilities.getUuid(), blocker: me.id, blocked: userId, created_at: new Date().toISOString() });
+    return {};
+  });
+}
+
+function unblockUser_(me, userId) {
+  return withLock_(function () {
+    const sheet = sheet_('Blocks');
+    readRows_(sheet)
+      .filter(function (r) { return r.data.blocker === me.id && r.data.blocked === userId; })
+      .reverse()
+      .forEach(function (r) { sheet.deleteRow(r.row); });
+    return {};
   });
 }
 

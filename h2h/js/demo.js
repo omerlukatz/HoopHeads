@@ -95,6 +95,8 @@ export function createDemoBackend(ApiError) {
     if (!user) throw new ApiError('Your session has ended. Sign in again.', 'auth');
     return user;
   };
+  const blockedEitherWay = (s, id) => (s.blocks || []).filter((b) => b.blocker === id || b.blocked === id).map((b) => (b.blocker === id ? b.blocked : b.blocker));
+  const unfriend = (s, a, b) => (s.friendships = s.friendships.filter((f) => !((f.user_a === a && f.user_b === b) || (f.user_a === b && f.user_b === a))));
   const friendIds = (s, id) => s.friendships.filter((f) => f.user_a === id || f.user_b === id).map((f) => (f.user_a === id ? f.user_b : f.user_a));
   const clean = (g) => Object.fromEntries(Object.entries(g).filter(([k]) => !k.startsWith('_')));
   const session = (s, userId) => {
@@ -158,6 +160,51 @@ export function createDemoBackend(ApiError) {
       return pub(me(load(), token));
     },
 
+    async updateProfile(token, { username, displayName } = {}) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      if (username != null) {
+        const name = String(username).trim().toLowerCase().replace(/^@/, '');
+        if (!/^[a-z0-9_.]{3,20}$/.test(name)) throw new ApiError('Usernames are 3–20 letters, numbers, dots or underscores.', 'invalid');
+        if (s.users.some((u) => u.username === name && u.id !== user.id)) throw new ApiError('That username is taken.', 'taken');
+        user.username = name;
+      }
+      if (displayName != null) {
+        const display = String(displayName).trim().replace(/\s+/g, ' ');
+        if (!display || display.length > 24) throw new ApiError('Enter a name up to 24 characters.', 'invalid');
+        user.display_name = display;
+        user.initial = display[0].toUpperCase();
+      }
+      save(s);
+      return pub(user);
+    },
+
+    async changePin(token, currentPin, newPin) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      if (!/^\d{4}$/.test(String(newPin))) throw new ApiError('Your new PIN must be 4 digits.', 'invalid');
+      const f = s.fails[user.username] || { count: 0, lockedUntil: 0 };
+      if (f.lockedUntil > Date.now()) throw new ApiError('Too many attempts.', 'locked', { retryAfter: Math.ceil((f.lockedUntil - Date.now()) / 1000) });
+      const expected = user.pin_hash || (await sha256(`${SALT}:${user.id}:${user.seed_pin}`));
+      if ((await sha256(`${SALT}:${user.id}:${currentPin}`)) !== expected) {
+        f.count += 1;
+        if (f.count >= MAX_TRIES) Object.assign(f, { count: 0, lockedUntil: Date.now() + LOCK_MS });
+        s.fails[user.username] = f;
+        save(s);
+        if (f.lockedUntil > Date.now()) throw new ApiError('Too many attempts.', 'locked', { retryAfter: LOCK_MS / 1000 });
+        throw new ApiError('Your current PIN is wrong.', 'wrong_pin', { triesLeft: MAX_TRIES - f.count });
+      }
+      delete s.fails[user.username];
+      user.pin_hash = await sha256(`${SALT}:${user.id}:${newPin}`);
+      delete user.seed_pin;
+      for (const [t, id] of Object.entries(s.sessions)) if (id === user.id) delete s.sessions[t]; // sign out other devices
+      const newToken = session(s, user.id);
+      save(s);
+      return { token: newToken };
+    },
+
     async getFriends(token) {
       await net();
       const s = load();
@@ -172,8 +219,9 @@ export function createDemoBackend(ApiError) {
       const q = String(query || '').trim().toLowerCase().replace(/^@/, '');
       if (q.length < 2) return [];
       const ids = friendIds(s, user.id);
+      const hidden = blockedEitherWay(s, user.id);
       return s.users
-        .filter((u) => u.id !== user.id && (u.username.includes(q) || u.display_name.toLowerCase().includes(q)))
+        .filter((u) => u.id !== user.id && !hidden.includes(u.id) && (u.username.includes(q) || u.display_name.toLowerCase().includes(q)))
         .slice(0, 20)
         .map((u) => ({ ...pub(u), isFriend: ids.includes(u.id) }));
     },
@@ -184,12 +232,50 @@ export function createDemoBackend(ApiError) {
       const user = me(s, token);
       const other = s.users.find((u) => u.id === userId);
       if (!other || other.id === user.id) throw new ApiError('Pick someone else to add.', 'invalid');
+      if (blockedEitherWay(s, user.id).includes(userId)) throw new ApiError('You can’t add this person.', 'invalid');
       if (!friendIds(s, user.id).includes(userId)) {
         const [a, b] = [user.id, userId].sort();
         s.friendships.push({ id: uuid(), user_a: a, user_b: b, created_at: new Date().toISOString() });
         save(s);
       }
       return pub(other);
+    },
+
+    async removeFriend(token, userId) {
+      await net();
+      const s = load();
+      unfriend(s, me(s, token).id, userId);
+      save(s);
+      return {};
+    },
+
+    async blockUser(token, userId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      if (!userId || userId === user.id) throw new ApiError('Pick someone else to block.', 'invalid');
+      unfriend(s, user.id, userId);
+      s.blocks = s.blocks || [];
+      if (!s.blocks.some((b) => b.blocker === user.id && b.blocked === userId)) s.blocks.push({ id: uuid(), blocker: user.id, blocked: userId, created_at: new Date().toISOString() });
+      save(s);
+      return {};
+    },
+
+    async unblockUser(token, userId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      s.blocks = (s.blocks || []).filter((b) => !(b.blocker === user.id && b.blocked === userId));
+      save(s);
+      return {};
+    },
+
+    async getBlocked(token) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const ids = (s.blocks || []).filter((b) => b.blocker === user.id).map((b) => b.blocked);
+      return s.users.filter((u) => ids.includes(u.id)).map(pub);
     },
 
     async getGames(token) {

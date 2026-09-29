@@ -28,6 +28,9 @@ const ICONS = {
   rematch:
     '<path d="M4.75 12a7.25 7.25 0 0 1 12.7-4.8M19.25 12a7.25 7.25 0 0 1-12.7 4.8"/><path d="M17.75 3.75v3.75H14M6.25 20.25V16.5H10"/>',
   chevron: '<path d="m9.5 5.75 6.25 6.25-6.25 6.25"/>',
+  key: '<circle cx="8" cy="15.5" r="4.25"/><path d="m11 12.5 8.25-8.25M16.25 7.25l2.5 2.5M14 9.5l2 2"/>',
+  more: '<circle cx="12" cy="12" r="8.75"/><circle cx="8.25" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15.75" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  block: '<circle cx="12" cy="12" r="8.75"/><path d="m5.8 5.8 12.4 12.4"/>',
   people: '<circle cx="9" cy="8.5" r="3.25"/><path d="M3.25 19.25c.6-3.1 2.9-5 5.75-5s5.15 1.9 5.75 5"/><circle cx="16.75" cy="9.25" r="2.5"/><path d="M15.5 14.4c.4-.1.8-.15 1.25-.15 2.2 0 3.95 1.5 4.5 4"/>',
   offline: '<path d="M2.5 8.8a14 14 0 0 1 19 0M5.75 12.3a9.3 9.3 0 0 1 12.5 0M9 15.7a4.6 4.6 0 0 1 6 0M12 19.25h.01M4 4l16 16"/>',
   alert: '<circle cx="12" cy="12" r="8.75"/><path d="M12 7.75v5M12 16.25h.01"/>',

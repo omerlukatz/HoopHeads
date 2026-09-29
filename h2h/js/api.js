@@ -5,13 +5,19 @@
 //   getMe(token)                        -> user
 //   getFriends(token)                   -> [user]
 //   searchUsers(token, query)           -> [user & { isFriend }]
+//   updateProfile(token, patch)         -> user    (patch: { username?, displayName? })
+//   changePin(token, currentPin, newPin) -> { token } (other devices are signed out)
 //   addFriend(token, userId)            -> user (instant, safe to repeat)
+//   removeFriend(token, userId)         -> {}      (games are kept)
+//   blockUser(token, userId)            -> {}      (also removes the friendship)
+//   unblockUser(token, userId)          -> {}
+//   getBlocked(token)                   -> [user]
 //   getGames(token)                     -> [game]  (every non-deleted game you played in)
 //   addGame(token, game)                -> game    (idempotent by id, safe to retry)
 //   updateGame(token, game)             -> game    (also used to un-delete)
 //   deleteGame(token, id)               -> { id }  (soft delete)
 // A user is { id, username, display_name, color, initial }.
-// Failures throw ApiError with code: 'network' | 'auth' | 'locked' | 'taken' | 'invalid' | 'server'.
+// Failures throw ApiError with code: 'network' | 'auth' | 'locked' | 'taken' | 'wrong_pin' | 'invalid' | 'server'.
 import { CONFIG } from '../config.js';
 import * as demo from './demo.js';
 
@@ -71,7 +77,13 @@ const remote = {
   getMe: (token) => call('GET', { action: 'me', token }),
   getFriends: (token) => call('GET', { action: 'friends', token }),
   searchUsers: (token, q) => call('GET', { action: 'search', token, q }),
+  updateProfile: (token, { username, displayName } = {}) => call('POST', { action: 'updateProfile', token, username, displayName }),
+  changePin: (token, currentPin, newPin) => call('POST', { action: 'changePin', token, currentPin, newPin }),
   addFriend: (token, userId) => call('POST', { action: 'addFriend', token, userId }),
+  removeFriend: (token, userId) => call('POST', { action: 'removeFriend', token, userId }),
+  blockUser: (token, userId) => call('POST', { action: 'blockUser', token, userId }),
+  unblockUser: (token, userId) => call('POST', { action: 'unblockUser', token, userId }),
+  getBlocked: (token) => call('GET', { action: 'blocked', token }),
   getGames: (token) => call('GET', { action: 'games', token }),
   addGame: (token, game) => call('POST', { action: 'addGame', token, game }),
   updateGame: (token, game) => call('POST', { action: 'updateGame', token, game }),
@@ -80,5 +92,5 @@ const remote = {
 
 const backend = isDemo ? demo.createDemoBackend(ApiError) : remote;
 
-export const { signUp, signIn, signOut, getMe, getFriends, searchUsers, addFriend, getGames, addGame, updateGame, deleteGame } = backend;
+export const { signUp, signIn, signOut, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getGames, addGame, updateGame, deleteGame } = backend;
 export const demoControls = isDemo ? demo.controls : null;
