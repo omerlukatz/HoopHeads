@@ -25,6 +25,8 @@ const ICONS = {
     '<path d="M12 3.75v11M8.25 11 12 14.75 15.75 11M8.5 10.25H6.75a1.5 1.5 0 0 0-1.5 1.5v7a1.5 1.5 0 0 0 1.5 1.5h10.5a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H15.5"/>',
   basketball:
     '<circle cx="12" cy="12" r="8.75"/><path d="M12 3.25v17.5M3.25 12h17.5M5.8 5.8c1.7 1.7 2.7 3.8 2.7 6.2s-1 4.5-2.7 6.2M18.2 5.8c-1.7 1.7-2.7 3.8-2.7 6.2s1 4.5 2.7 6.2"/>',
+  soccer:
+    '<circle cx="12" cy="12" r="8.75"/><path d="m12 8.4 3.4 2.5-1.3 4h-4.2l-1.3-4Z"/><path d="M12 8.4V3.3M15.4 10.9l4.8-1.6M14.1 14.9l3 4.1M9.9 14.9l-3 4.1M8.6 10.9 3.8 9.3"/>',
   rematch:
     '<path d="M4.75 12a7.25 7.25 0 0 1 12.7-4.8M19.25 12a7.25 7.25 0 0 1-12.7 4.8"/><path d="M17.75 3.75v3.75H14M6.25 20.25V16.5H10"/>',
   chevron: '<path d="m9.5 5.75 6.25 6.25-6.25 6.25"/>',
@@ -53,6 +55,11 @@ export function logo(abbr, { size = 'md', alt, lazy = false } = {}) {
   const team = getTeam(abbr);
   if (!team) return `<span class="logo logo--${size} logo--empty" aria-hidden="true"></span>`;
   const label = alt ?? team.name;
+  if (!team.logo) {
+    // No badge image (FIFA clubs for now): the code on the club colour
+    const a11y = label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"';
+    return `<span class="logo logo--${size} is-fallback" style="--team:${team.color}" data-abbr="${team.abbr}"><span class="logo__fallback" ${a11y}>${team.abbr}</span></span>`;
+  }
   return `<span class="logo logo--${size}" style="--team:${team.color}" data-abbr="${team.abbr}"><img src="${team.logo}" alt="${esc(label)}" width="256" height="256" decoding="async"${lazy ? ' loading="lazy"' : ''} draggable="false"></span>`;
 }
 

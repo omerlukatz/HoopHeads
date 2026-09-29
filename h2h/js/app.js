@@ -1,8 +1,8 @@
-import { TEAMS, getTeam, searchTeams } from './teams.js';
+import { getTeam, searchTeams, teamsFor } from './teams.js';
 import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
-import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
+import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, sportOf, CLUTCH_TESTS, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, AVATARS, changePinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
@@ -34,6 +34,23 @@ function loadTrendPrefs() {
 const meId = () => state.session?.userId;
 const meName = () => state.me?.display_name || '';
 const oppName = () => store.rival()?.display_name || 'Opponent';
+
+// ---------- game modes ----------
+// The UI is the same for both games; only the stats and a few labels change.
+
+const isFifa = () => state.mode === 'fifa';
+const MODE_NAMES = { '2k': 'NBA 2K', fifa: 'FIFA' };
+const gamesIn = (r) => r.wins + (r.draws || 0) + r.losses;
+/** "12–7", or W–D–L in FIFA: "12–3–7". */
+const wl = (r) => (isFifa() ? `${r.wins}–${r.draws || 0}–${r.losses}` : `${r.wins}–${r.losses}`);
+/** The same record from the other player's side. */
+const wlFlip = (r) => wl({ wins: r.losses, draws: r.draws, losses: r.wins });
+const recordClass = (r) => (!gamesIn(r) || r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss');
+const resultClass = (g) => (g.win ? 'is-win' : g.loss ? 'is-loss' : '');
+const resultWord = (g) => (g.win ? 'Win' : g.draw ? 'Draw' : 'Loss');
+/** "Won 4–3 on penalties" / "after extra time" / "in overtime": how the game was decided, if not in normal time. */
+const decidedText = (g) =>
+  g.shootout ? `${g.win ? 'Won' : 'Lost'} ${g.myPens}–${g.oppPens} on penalties` : g.overtime ? (g.sport === 'fifa' ? 'After extra time' : 'In overtime') : '';
 
 // ---------- formatting ----------
 
@@ -179,21 +196,30 @@ const noFriendsState = () => `<div class="empty">
     <button type="button" class="btn btn--primary" data-nav="friends">Find Friends</button>
   </div>`;
 
-const wlPill = (win) =>
-  `<span class="pill ${win ? 'pill--w' : 'pill--l'}" aria-label="${win ? 'Win' : 'Loss'}">${win ? 'W' : 'L'}</span>`;
-const otPill = '<span class="pill pill--ot" aria-label="Overtime">O</span>';
-/** W/L pill, plus an orange O when the game went to overtime. */
-const resultPills = (g) => `<span class="row__pills">${g.overtime ? otPill : ''}${wlPill(g.win)}</span>`;
+const resultPill = (g) => `<span class="pill pill--${g.result.toLowerCase()}" aria-label="${resultWord(g)}">${g.result}</span>`;
+/** Orange marker for how the game was decided: O (2K overtime), ET (extra time) or PEN (shootout). */
+const extraPill = (g) =>
+  g.shootout
+    ? '<span class="pill pill--ot" aria-label="Penalties">PEN</span>'
+    : g.overtime
+      ? g.sport === 'fifa'
+        ? '<span class="pill pill--ot" aria-label="Extra time">ET</span>'
+        : '<span class="pill pill--ot" aria-label="Overtime">O</span>'
+      : '';
+/** W/D/L pill on the far right, with the orange marker to its left. */
+const resultPills = (g) => `<span class="row__pills">${extraPill(g)}${resultPill(g)}</span>`;
+const scoreSpans = (g) =>
+  `<span class="num num--end ${g.win ? 'is-winner' : ''}">${g.myScore}</span><span class="row__dash">–</span><span class="num ${g.loss ? 'is-winner' : ''}">${g.oppScore}</span>`;
 
 function gameRow(g) {
   const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
   const byOpp = g.createdBy && g.createdBy !== meId();
-  const meta = g.note || '';
+  const meta = [g.shootout && decidedText(g), g.note].filter(Boolean).join(' · ');
   const tags = [
     g.pending ? `<span class="tag tag--pending">${icon('clock')}Not synced</span>` : '',
     byOpp ? `<span class="tag">Logged by ${esc(oppName())}</span>` : '',
   ].join('');
-  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${g.win ? 'Win' : 'Loss'}${g.overtime ? ' in overtime' : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}Edit game.`;
+  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${resultWord(g)}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}Edit game.`;
   return `<li class="row-wrap" data-id="${g.id}">
     <div class="row-clip">
       <div class="row-actions" aria-hidden="true">
@@ -204,7 +230,7 @@ function gameRow(g) {
         <span class="row__main">
           <span class="row__match">
             ${logo(g.myTeam, { size: 'sm', alt: '' })}
-            <span class="row__score"><span class="num num--end ${g.win ? 'is-winner' : ''}">${g.myScore}</span><span class="row__dash">–</span><span class="num ${g.win ? '' : 'is-winner'}">${g.oppScore}</span></span>
+            <span class="row__score">${scoreSpans(g)}</span>
             ${logo(g.oppTeam, { size: 'sm', alt: '' })}
           </span>
           ${meta || tags ? `<span class="row__meta">${tags}${meta ? `<span class="row__note">${esc(meta)}</span>` : ''}</span>` : ''}
@@ -223,7 +249,8 @@ const loadError = () => `<div class="empty">
     <button type="button" class="btn btn--primary" data-action="retry">Try Again</button>
   </div>`;
 
-const winsLosses = (w, l) => `${w} ${w === 1 ? 'win' : 'wins'}, ${l} ${l === 1 ? 'loss' : 'losses'}`;
+const winsLosses = (w, l, d = 0) => `${w} ${w === 1 ? 'win' : 'wins'}, ${d ? `${d} ${d === 1 ? 'draw' : 'draws'}, ` : ''}${l} ${l === 1 ? 'loss' : 'losses'}`;
+const recLabel = (r) => winsLosses(r.wins, r.losses, r.draws || 0);
 
 const skeletonRows = (n) =>
   `<ul class="list" role="list" aria-hidden="true">${'<li class="skel-row"><span class="skel skel--date"></span><span class="skel skel--line"></span><span class="skel skel--pill"></span></li>'.repeat(n)}</ul>`;
@@ -238,7 +265,8 @@ function renderDashboardHeader() {
     ? `<button type="button" class="rival-switch" data-action="switch-rival" aria-label="Rivalry with ${esc(r.display_name)}. Switch friend">vs ${esc(r.display_name)}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.75 9.75 5.25 5.25 5.25-5.25"/></svg></button>`
     : 'Dashboard';
   $('#dash-navtitle').textContent = r ? `vs ${r.display_name}` : 'Dashboard';
-  $('#history-eyebrow').textContent = r ? `vs ${r.display_name}` : '\u00a0';
+  $('#dash-eyebrow').textContent = MODE_NAMES[state.mode];
+  $('#history-eyebrow').textContent = r ? `${MODE_NAMES[state.mode]} · vs ${r.display_name}` : MODE_NAMES[state.mode];
 }
 
 function renderDashboard() {
@@ -262,7 +290,7 @@ function renderDashboard() {
     return;
   }
   if (!s.total) {
-    el.innerHTML = emptyState({ iconName: 'basketball', text: `No games against ${oppName()} yet.`, button: 'Log First Game' });
+    el.innerHTML = emptyState({ iconName: isFifa() ? 'soccer' : 'basketball', text: `No ${MODE_NAMES[state.mode]} games against ${oppName()} yet.`, button: 'Log First Game' });
     ui.shown = {};
     return;
   }
@@ -274,21 +302,32 @@ function renderDashboard() {
     return `<span class="num" data-from="${from}" data-to="${value}"${opts.decimals ? ` data-decimals="${opts.decimals}"` : ''}${opts.signed ? ' data-signed' : ''}>${formatNumber(from, opts)}</span>`;
   };
   const opp = esc(oppName());
+  const drawsText = isFifa() && s.draws ? ` · ${s.draws} ${s.draws === 1 ? 'draw' : 'draws'}` : '';
   const h2h =
-    s.wins === s.losses
+    (s.wins === s.losses
       ? `You and ${opp} are tied ${s.wins}–${s.losses}`
       : s.wins > s.losses
         ? `You lead ${opp} ${s.wins}–${s.losses}`
-        : `${opp} leads you ${s.losses}–${s.wins}`;
-  const gameTile = (key, title, g, emptyText) =>
+        : `${opp} leads you ${s.losses}–${s.wins}`) + drawsText;
+  const tileSub = (g, lead = '') => {
+    const how = g.shootout
+      ? decidedText(g)
+      : `${g.draw ? 'Draw' : `${g.win ? 'Won' : 'Lost'} by ${Math.abs(g.margin)}`}${g.overtime ? (isFifa() ? ' · ET' : ' · OT') : ''}`;
+    return `${lead}${how} · ${shortDate(g.date)}`;
+  };
+  const gameTile = (key, title, g, emptyText, lead) =>
     g
       ? `<section class="card tile area-${key}" aria-label="${title}: ${g.myScore} to ${g.oppScore}, ${shortDate(g.date)}">
           <h3 class="tile__title">${title}</h3>
           <span class="mini-match">${logo(g.myTeam, { size: 'sm', alt: '' })}${logo(g.oppTeam, { size: 'sm', alt: '' })}</span>
-          <span class="tile__score"><span class="${g.win ? 'is-win' : 'is-loss'}">${g.myScore}</span><span class="dash">–</span>${g.oppScore}</span>
-          <span class="tile__sub">${g.win ? 'Won' : 'Lost'} by ${Math.abs(g.margin)}${g.overtime ? ' · OT' : ''} · ${shortDate(g.date)}</span>
+          <span class="tile__score"><span class="${resultClass(g)}">${g.myScore}</span><span class="dash">–</span>${g.oppScore}</span>
+          <span class="tile__sub">${tileSub(g, lead ? lead(g) : '')}</span>
         </section>`
       : `<section class="card tile area-${key}"><h3 class="tile__title">${title}</h3><p class="tile__empty">${emptyText}</p></section>`;
+  const streakWord = { W: ['win', 'wins'], D: ['draw', 'draws'], L: ['loss', 'losses'] }[s.streak.result];
+  const scoring = isFifa()
+    ? { title: 'Goals', cells: [['Avg For', 'for', s.avgFor, { decimals: 1 }, ''], ['Avg Against', 'against', s.avgAgainst, { decimals: 1 }, ''], ['Goal Diff', 'gd', s.goalDiff, { signed: true }, s.goalDiff >= 0 ? 'is-win' : 'is-loss']] }
+    : { title: 'Scoring', cells: [['Avg Scored', 'for', s.avgFor, { decimals: 1 }, ''], ['Avg Allowed', 'against', s.avgAgainst, { decimals: 1 }, ''], ['Avg Margin', 'margin', s.avgMargin, { decimals: 1, signed: true }, s.avgMargin >= 0 ? 'is-win' : 'is-loss']] };
   const prevRing = prev.ring ?? 0;
   prev.ring = pct;
 
@@ -306,30 +345,28 @@ function renderDashboard() {
         </div>
         <div class="hero__record">
           <p class="eyebrow">Your Record</p>
-          <p class="record" aria-label="${winsLosses(s.wins, s.losses)}">${num('wins', s.wins)}<span class="record__dash">–</span>${num('losses', s.losses)}</p>
+          <p class="record${isFifa() ? ' record--wdl' : ''}" aria-label="${recLabel(s)}">${num('wins', s.wins)}<span class="record__dash">–</span>${isFifa() ? `${num('draws', s.draws)}<span class="record__dash">–</span>` : ''}${num('losses', s.losses)}</p>
           <p class="hero__sub">${h2h}</p>
         </div>
       </div>
       <dl class="hero__streaks">
-        <div><dt>Current Streak</dt><dd class="${s.streak.win ? 'is-win' : 'is-loss'}" aria-label="${s.streak.count} ${s.streak.win ? (s.streak.count === 1 ? 'win' : 'wins') : s.streak.count === 1 ? 'loss' : 'losses'} in a row">${s.streak.win ? 'W' : 'L'}${num('streak', s.streak.count)}</dd></div>
+        <div><dt>Current Streak</dt><dd class="${s.streak.result === 'W' ? 'is-win' : s.streak.result === 'L' ? 'is-loss' : ''}" aria-label="${s.streak.count} ${streakWord[s.streak.count === 1 ? 0 : 1]} in a row">${s.streak.result}${num('streak', s.streak.count)}</dd></div>
         <div><dt>Longest Win</dt><dd class="${s.longestWin ? 'is-win' : ''}" aria-label="Longest winning streak: ${s.longestWin}">W${num('longestWin', s.longestWin)}</dd></div>
         <div><dt>Longest Loss</dt><dd class="${s.longestLoss ? 'is-loss' : ''}" aria-label="Longest losing streak: ${s.longestLoss}">L${num('longestLoss', s.longestLoss)}</dd></div>
       </dl>
     </section>
 
     <section class="card tile area-scoring">
-      <h3 class="tile__title">Scoring</h3>
+      <h3 class="tile__title">${scoring.title}</h3>
       <dl class="trio">
-        <div><dt>Avg Scored</dt><dd>${num('for', s.avgFor, { decimals: 1 })}</dd></div>
-        <div><dt>Avg Allowed</dt><dd>${num('against', s.avgAgainst, { decimals: 1 })}</dd></div>
-        <div><dt>Avg Margin</dt><dd class="${s.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${num('margin', s.avgMargin, { decimals: 1, signed: true })}</dd></div>
+        ${scoring.cells.map(([label, key, value, opts, cls]) => `<div><dt>${label}</dt><dd${cls ? ` class="${cls}"` : ''}>${num(key, value, opts)}</dd></div>`).join('')}
       </dl>
     </section>
 
     <section class="card trend area-trend" id="trend-card" aria-labelledby="trend-title"></section>
 
     ${gameTile('blowout', 'Biggest Win', s.biggestWin, 'No wins yet.')}
-    ${gameTile('closest', 'Closest Game', s.closest)}
+    ${isFifa() ? gameTile('closest', 'Most Goals', s.mostGoals, '', (g) => `${g.myScore + g.oppScore} goals · `) : gameTile('closest', 'Closest Game', s.closest)}
 
     ${clutchTile()}
 
@@ -365,21 +402,38 @@ function renderDashboard() {
 
 // ---------- clutch, teams ----------
 
+/** What each Clutch cell shows and its pop-up title. */
+const CLUTCH_CELLS = {
+  close: { label: `Close (≤${CLOSE_MARGIN})`, title: `Close Games (≤${CLOSE_MARGIN})` },
+  overtime: { label: 'Overtime', title: 'Overtime Games' },
+  blowouts: { label: `Blowouts (${BLOWOUT_MARGIN}+)`, title: `Blowouts (${BLOWOUT_MARGIN}+)` },
+  oneGoal: { label: '1-Goal Games', title: 'One-Goal Games' },
+  shootouts: { label: 'Penalties', title: 'Penalty Shootouts' },
+  cleanSheets: { label: 'Clean Sheets', title: 'Clean Sheets' },
+};
+
 function clutchTile() {
   const c = clutch(ui.views);
-  const cell = (label, r, hint, key) => {
+  // These cells can't contain draws, so they're always W–L
+  const cell = (key, r) => {
+    const { label } = CLUTCH_CELLS[key];
     const n = r.wins + r.losses;
-    const cls = !n || r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss';
     return `<div><button type="button" class="stat-link" data-clutch="${key}" aria-label="${label}: ${n ? winsLosses(r.wins, r.losses) : 'no games'}. Show games">
-      <span class="trio__dt">${label}</span><span class="trio__dd ${cls}">${n ? `${r.wins}–${r.losses}` : '—'}</span><span class="trio__hint">${n ? `${Math.round((r.wins / n) * 100)}%` : hint}</span>
+      <span class="trio__dt">${label}</span><span class="trio__dd ${recordClass(r)}">${n ? `${r.wins}–${r.losses}` : '—'}</span><span class="trio__hint">${n ? `${Math.round((r.wins / n) * 100)}%` : 'None yet'}</span>
+    </button></div>`;
+  };
+  // Clean sheets: how many games you kept the other side to 0, vs how many they did
+  const sheets = () => {
+    const { mine, theirs } = c.cleanSheets;
+    const cls = mine === theirs ? '' : mine > theirs ? 'is-win' : 'is-loss';
+    return `<div><button type="button" class="stat-link" data-clutch="cleanSheets" aria-label="Clean sheets: you ${mine}, ${esc(oppName())} ${theirs}. Show games">
+      <span class="trio__dt">Clean Sheets</span><span class="trio__dd ${cls}">${mine}</span><span class="trio__hint">${esc(oppName())}: ${theirs}</span>
     </button></div>`;
   };
   return `<section class="card tile area-clutch" aria-labelledby="clutch-title">
     <h3 class="tile__title" id="clutch-title">Clutch</h3>
     <div class="trio">
-      ${cell(`Close (≤${CLOSE_MARGIN})`, c.close, 'None yet', 'close')}
-      ${cell('Overtime', c.overtime, 'None yet', 'overtime')}
-      ${cell(`Blowouts (${BLOWOUT_MARGIN}+)`, c.blowouts, 'None yet', 'blowouts')}
+      ${isFifa() ? `${cell('oneGoal', c.oneGoal)}${cell('shootouts', c.shootouts)}${sheets()}` : `${cell('close', c.close)}${cell('overtime', c.overtime)}${cell('blowouts', c.blowouts)}`}
     </div>
   </section>`;
 }
@@ -413,11 +467,11 @@ function renderTeams() {
   const row = (kind, r) => {
     if (!r) return '';
     const t = getTeam(r.abbr);
-    return `<li><button type="button" class="stat-link teams__row" data-team-games="${esc(r.abbr)}" data-team-side="${side}" aria-label="${kind === 'best' ? 'Best' : 'Worst'} team: ${esc(t?.name || r.abbr)}, ${winsLosses(r.wins, r.losses)}. Show games">
+    return `<li><button type="button" class="stat-link teams__row" data-team-games="${esc(r.abbr)}" data-team-side="${side}" aria-label="${kind === 'best' ? 'Best' : 'Worst'} team: ${esc(t?.name || r.abbr)}, ${recLabel(r)}. Show games">
       <span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>
       ${logo(r.abbr, { size: 'md', alt: '' })}
-      <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
-      <span class="teams__record">${r.wins}–${r.losses}</span>
+      <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}%${isFifa() ? '' : ' wins'}</span></span>
+      <span class="teams__record">${wl(r)}</span>
     </button></li>`;
   };
   card.innerHTML = `
@@ -469,14 +523,13 @@ document.addEventListener('click', (e) => {
   const clutchBtn = e.target.closest('[data-clutch]');
   if (clutchBtn) {
     const kind = clutchBtn.dataset.clutch;
-    const pick = {
-      close: { title: `Close Games (≤${CLOSE_MARGIN})`, test: (g) => Math.abs(g.margin) <= CLOSE_MARGIN },
-      overtime: { title: 'Overtime Games', test: (g) => g.overtime },
-      blowouts: { title: `Blowouts (${BLOWOUT_MARGIN}+)`, test: (g) => Math.abs(g.margin) >= BLOWOUT_MARGIN },
-    }[kind];
-    const list = ui.views.filter(pick.test);
+    const list = ui.views.filter(CLUTCH_TESTS[kind]);
     const r = record(list);
-    gamesPopup(pick.title, `vs ${oppName()} · You’re ${r.wins}–${r.losses}`, list);
+    const sub =
+      kind === 'cleanSheets'
+        ? `vs ${oppName()} · You kept ${list.filter((g) => g.oppScore === 0).length} · ${oppName()} kept ${list.filter((g) => g.myScore === 0).length}`
+        : `vs ${oppName()} · You’re ${wl(r)}`;
+    gamesPopup(CLUTCH_CELLS[kind].title, sub, list);
     return;
   }
   const teamBtn = e.target.closest('[data-team-games]');
@@ -488,7 +541,7 @@ document.addEventListener('click', (e) => {
     const name = getTeam(abbr)?.name || abbr;
     gamesPopup(
       mine ? `You as the ${name}` : `${oppName()} as the ${name}`,
-      mine ? `You’re ${r.wins}–${r.losses} with them` : `${oppName()} is ${r.losses}–${r.wins} with them · you’re ${r.wins}–${r.losses}`,
+      mine ? `You’re ${wl(r)} with them` : `${oppName()} is ${wlFlip(r)} with them · you’re ${wl(r)}`,
       list,
     );
   }
@@ -541,7 +594,7 @@ function renderHistory() {
     return;
   }
   if (!ui.views.length) {
-    el.innerHTML = emptyState({ iconName: 'history', text: `Games against ${oppName()} will appear here.`, button: 'Log a Game' });
+    el.innerHTML = emptyState({ iconName: 'history', text: `${MODE_NAMES[state.mode]} games against ${oppName()} will appear here.`, button: 'Log a Game' });
     return;
   }
   const months = new Map();
@@ -555,7 +608,7 @@ function renderHistory() {
       .map((games, i) => {
         const r = record(games);
         return `<section class="group" aria-labelledby="month-${i}">
-          <div class="group__head"><h2 id="month-${i}">${monthLabel(games[0].date)}</h2><span class="group__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></div>
+          <div class="group__head"><h2 id="month-${i}">${monthLabel(games[0].date)}</h2><span class="group__record" aria-label="${recLabel(r)}">${wl(r)}</span></div>
           <ul class="list list--games" role="list">${games.map(gameRow).join('')}</ul>
         </section>`;
       })
@@ -599,7 +652,20 @@ function renderSettings() {
         ? `You’re offline.${pending ? ` ${pending} ${pending === 1 ? 'change is' : 'changes are'} saved on this device and will sync when you’re back online.` : ''}`
         : 'Games your friends log show up automatically while the app is open.';
 
+  const modes = [['2k', 'NBA 2K'], ['fifa', 'FIFA']];
+  const modeIndex = modes.findIndex(([id]) => id === state.mode);
   el.innerHTML = `
+  <section class="group" aria-labelledby="set-mode">
+    <div class="group__head"><h2 id="set-mode">Game Mode</h2></div>
+    <div class="list mode-card">
+      <div class="seg seg--large" role="radiogroup" aria-labelledby="set-mode" style="--count:2;--index:${modeIndex}">
+        <span class="seg__thumb" aria-hidden="true"></span>
+        ${modes.map(([id, name], i) => `<button type="button" class="seg__item" role="radio" aria-checked="${i === modeIndex}" tabindex="${i === modeIndex ? 0 : -1}" data-mode="${id}">${name}</button>`).join('')}
+      </div>
+    </div>
+    <p class="group__foot">Each game keeps its own stats. The app opens on whichever game you played last.</p>
+  </section>
+
   <section class="group" aria-labelledby="set-account">
     <div class="group__head"><h2 id="set-account">Account</h2></div>
     <ul class="list" role="list">
@@ -672,6 +738,14 @@ function initSettings() {
     }
   });
   root.addEventListener('click', (e) => {
+    const modeBtn = e.target.closest('[data-mode]');
+    if (modeBtn) {
+      if (modeBtn.dataset.mode === state.mode) return;
+      haptic('light');
+      store.setMode(modeBtn.dataset.mode);
+      toast(`Switched to ${MODE_NAMES[state.mode]}`);
+      return;
+    }
     const swatch = e.target.closest('[data-swatch]');
     if (swatch) {
       haptic('light');
@@ -940,9 +1014,12 @@ function openGameSheet({ id = null } = {}) {
   let opponent = state.friends.find((f) => f.id === otherId) || store.rival();
   const lastVs = (fid) => views(store.pairGames(fid), meId())[0];
   const last = lastVs(opponent.id);
+  // The sport is fixed when editing; a new game is logged in the current game mode
+  const sport = editing ? sportOf(source) : state.mode;
+  const fifa = sport === 'fifa';
   const draft = editing
-    ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note }
-    : { date: todayISO(), myTeam: last?.myTeam ?? ui.views[0]?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '' };
+    ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note, myPens: view.myPens ?? '', oppPens: view.oppPens ?? '' }
+    : { date: todayISO(), myTeam: last?.myTeam ?? ui.views[0]?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' };
   const opp = opponent.display_name;
   const canSwitch = !editing && state.friends.length > 1;
 
@@ -959,7 +1036,7 @@ function openGameSheet({ id = null } = {}) {
         <div class="side">
           <span class="side__name">You</span>
           <div class="side__tile" data-slot="myTeam">${teamTile('myTeam', draft.myTeam)}</div>
-          <input class="score-input" id="score-me" name="myScore" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="next" placeholder="0" aria-label="Your score" value="${draft.myScore}">
+          <input class="score-input" id="score-me" name="myScore" inputmode="numeric" pattern="[0-9]*" maxlength="${fifa ? 2 : 3}" enterkeyhint="next" placeholder="0" aria-label="${fifa ? 'Your goals' : 'Your score'}" value="${draft.myScore}">
         </div>
         <span class="matchup__vs" aria-hidden="true">VS</span>
         <div class="side">
@@ -969,14 +1046,20 @@ function openGameSheet({ id = null } = {}) {
               : `<span class="side__name">${esc(opp)}</span>`
           }
           <div class="side__tile" data-slot="oppTeam">${teamTile('oppTeam', draft.oppTeam, opp)}</div>
-          <input class="score-input" id="score-opp" name="oppScore" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="done" placeholder="0" aria-label="${esc(opp)}’s score" value="${draft.oppScore}">
+          <input class="score-input" id="score-opp" name="oppScore" inputmode="numeric" pattern="[0-9]*" maxlength="${fifa ? 2 : 3}" enterkeyhint="done" placeholder="0" aria-label="${esc(opp)}’s ${fifa ? 'goals' : 'score'}" value="${draft.oppScore}">
         </div>
       </div>
       <p class="form-hint" role="status" aria-live="polite"></p>
 
       <ul class="list list--form" role="list">
         <li class="cell"><label for="g-date">Date</label><input type="date" id="g-date" name="date" class="date-input" value="${draft.date}" max="${todayISO()}" required></li>
-        <li class="cell"><label for="g-ot">Overtime</label><input type="checkbox" role="switch" class="switch" id="g-ot" name="overtime"${draft.overtime ? ' checked' : ''}></li>
+        <li class="cell"><label for="g-ot">${fifa ? 'Extra Time' : 'Overtime'}</label><input type="checkbox" role="switch" class="switch" id="g-ot" name="overtime"${draft.overtime ? ' checked' : ''}></li>
+        ${
+          fifa
+            ? `<li class="cell pens-row" data-pens hidden><span class="pens-row__label">Penalties</span>
+                <span class="pens-row__inputs"><input class="pens-input" name="myPens" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="You" aria-label="Your penalties" value="${draft.myPens}"><span aria-hidden="true">–</span><input class="pens-input" name="oppPens" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="${esc(opp)}" aria-label="${esc(opp)}’s penalties" value="${draft.oppPens}"></span></li>`
+            : ''
+        }
         <li class="cell"><label for="g-note" class="visually-hidden">Note</label><input id="g-note" name="note" class="cell__input cell__input--full" placeholder="Note (optional)" maxlength="80" value="${esc(draft.note)}" enterkeyhint="done"></li>
       </ul>
 
@@ -995,21 +1078,37 @@ function openGameSheet({ id = null } = {}) {
     date: form.date.value,
     overtime: form.overtime.checked,
     note: form.note.value.trim(),
+    myPens: fifa ? form.myPens.value : '',
+    oppPens: fifa ? form.oppPens.value : '',
   });
 
+  const pensRow = $('[data-pens]', content);
   const validate = () => {
     const d = read();
     const filled = d.myScore !== '' && d.oppScore !== '';
     const tie = filled && +d.myScore === +d.oppScore;
-    const ok = filled && !tie && d.myTeam && d.oppTeam && d.date;
-    hint.textContent = tie ? 'Basketball has no ties. Someone has to win.' : '';
+    // FIFA: a level game can be a draw, or go to a penalty shootout (after extra time)
+    const shootoutOpen = fifa && tie && d.overtime;
+    if (pensRow) pensRow.hidden = !shootoutOpen;
+    const pens = shootoutOpen && (d.myPens !== '' || d.oppPens !== '');
+    const pensBad = pens && (d.myPens === '' || d.oppPens === '' || +d.myPens === +d.oppPens);
+    const ok = filled && (fifa || !tie) && !pensBad && d.myTeam && d.oppTeam && d.date;
+    hint.textContent = !fifa && tie
+      ? 'Basketball has no ties. Someone has to win.'
+      : pensBad
+        ? 'Enter both penalty scores. A shootout needs a winner.'
+        : fifa && tie && !d.overtime
+          ? 'A draw. Went to penalties? Turn on Extra Time.'
+          : shootoutOpen && !pens
+            ? 'Level after extra time. Add the shootout score, or save it as a draw.'
+            : '';
     saveBtns.forEach((b) => (b.disabled = !ok));
     return ok;
   };
 
-  for (const input of $$('.score-input', content)) {
+  for (const input of $$('.score-input, .pens-input', content)) {
     input.addEventListener('input', () => {
-      input.value = input.value.replace(/\D/g, '').slice(0, 3);
+      input.value = input.value.replace(/\D/g, '').slice(0, fifa ? 2 : 3);
       validate();
     });
     input.addEventListener('focus', () => input.select());
@@ -1043,7 +1142,7 @@ function openGameSheet({ id = null } = {}) {
     const pick = e.target.closest('[data-pick]');
     if (pick) {
       const side = pick.dataset.pick;
-      const chosen = await openTeamPicker(side, draft[side], opponent);
+      const chosen = await openTeamPicker(side, draft[side], opponent, sport);
       if (!chosen) return;
       draft[side] = chosen;
       const slot = $(`[data-slot="${side}"]`, content);
@@ -1074,10 +1173,14 @@ function openGameSheet({ id = null } = {}) {
     // Edits keep the game's original orientation; new games put the logger in player1.
     const mine = editing && source.player2_id === meId() ? 2 : 1;
     const theirs = mine === 1 ? 2 : 1;
+    const shootout = fifa && +d.myScore === +d.oppScore && d.overtime && d.myPens !== '' && d.oppPens !== '';
     const neutral = {
+      sport,
       date: d.date,
       overtime: d.overtime,
       note: d.note,
+      [`player${mine}_pens`]: shootout ? Number(d.myPens) : '',
+      [`player${theirs}_pens`]: shootout ? Number(d.oppPens) : '',
       [`player${mine}_id`]: meId(),
       [`player${theirs}_id`]: opponent.id,
       [`player${mine}_score`]: Number(d.myScore),
@@ -1106,14 +1209,14 @@ function openGameSheet({ id = null } = {}) {
 function staticGameRow(g, opponents = null, { withMonth = false } = {}) {
   const opp = opponents?.get(g.oppId);
   const oppLabel = opponents ? (g.oppId === meId() ? 'You' : opp?.display_name || 'Unknown') : null;
-  const meta = [oppLabel && `vs ${oppLabel}`, g.note].filter(Boolean).join(' · ');
+  const meta = [oppLabel && `vs ${oppLabel}`, g.shootout && decidedText(g), g.note].filter(Boolean).join(' · ');
   const under = withMonth ? fmt(g.date, { month: 'short' }) : fmt(g.date, { weekday: 'short' });
-  return `<li class="row-wrap"><div class="row-clip"><div class="row row--static" aria-label="${esc(longDate(g.date))}: ${g.myScore} to ${g.oppScore}, ${g.win ? 'win' : 'loss'}${g.overtime ? ' in overtime' : ''}">
+  return `<li class="row-wrap"><div class="row-clip"><div class="row row--static" aria-label="${esc(longDate(g.date))}: ${g.myScore} to ${g.oppScore}, ${resultWord(g).toLowerCase()}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}">
     <span class="row__date"><span class="row__day">${asDate(g.date).getDate()}</span><span class="row__dow">${under}</span></span>
     <span class="row__main">
       <span class="row__match">
         ${logo(g.myTeam, { size: 'sm', alt: getTeam(g.myTeam)?.name })}
-        <span class="row__score"><span class="num num--end ${g.win ? 'is-winner' : ''}">${g.myScore}</span><span class="row__dash">–</span><span class="num ${g.win ? '' : 'is-winner'}">${g.oppScore}</span></span>
+        <span class="row__score">${scoreSpans(g)}</span>
         ${logo(g.oppTeam, { size: 'sm', alt: getTeam(g.oppTeam)?.name })}
       </span>
       ${meta ? `<span class="row__meta"><span class="row__note">${esc(meta)}</span></span>` : ''}
@@ -1198,7 +1301,8 @@ function paintProfile() {
     return;
   }
 
-  const { user, opponents: oppList, games: allGames } = fp.data;
+  const { user, opponents: oppList } = fp.data;
+  const allGames = fp.data.games.filter((g) => sportOf(g) === state.mode); // current game mode only
   const opponents = new Map(oppList.map((u) => [u.id, u]));
   const opps = opponentRecords(views(allGames, user.id));
   if (fp.sel && !opps.some((o) => o.id === fp.sel)) fp.sel = null;
@@ -1219,7 +1323,7 @@ function paintProfile() {
     : '';
 
   if (!st.total) {
-    page.innerHTML = `<div class="fpage">${head}<p class="search-note">${isMe ? 'You haven’t' : `${esc(user.display_name)} hasn’t`} played any games yet.</p></div>`;
+    page.innerHTML = `<div class="fpage">${head}<p class="search-note">${isMe ? 'You haven’t' : `${esc(user.display_name)} hasn’t`} played any ${MODE_NAMES[state.mode]} games yet.</p></div>`;
     return;
   }
 
@@ -1231,8 +1335,8 @@ function paintProfile() {
   const teamRow = (kind, r) =>
     r
       ? `<li class="teams__row"><span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>${logo(r.abbr, { size: 'md', alt: '' })}
-          <span class="teams__name"><span>${esc(getTeam(r.abbr)?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
-          <span class="teams__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></li>`
+          <span class="teams__name"><span>${esc(getTeam(r.abbr)?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}%${isFifa() ? '' : ' wins'}</span></span>
+          <span class="teams__record" aria-label="${recLabel(r)}">${wl(r)}</span></li>`
       : '';
   const vsMe = !isMe && (!sel || sel === meId()) && opps.find((o) => o.id === meId());
   const months = new Map();
@@ -1254,12 +1358,12 @@ function paintProfile() {
         </div>
         <div class="hero__record">
           <p class="eyebrow">${sel ? `Record ${esc(vsText)}` : 'Overall Record'}</p>
-          <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
+          <p class="record${isFifa() ? ' record--wdl' : ''}" aria-label="${recLabel(st)}">${st.wins}<span class="record__dash">–</span>${isFifa() ? `${st.draws}<span class="record__dash">–</span>` : ''}${st.losses}</p>
           <p class="hero__sub">${st.total} ${st.total === 1 ? 'game' : 'games'}${sel ? ` · ${isMe ? 'your' : `${esc(name)}’s`} side` : ` · ${opps.length} ${opps.length === 1 ? 'opponent' : 'opponents'}`}</p>
         </div>
       </div>
       <dl class="hero__streaks">
-        <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
+        <div><dt>Current Streak</dt><dd class="${st.streak.result === 'W' ? 'is-win' : st.streak.result === 'L' ? 'is-loss' : ''}">${st.streak.result}${st.streak.count}</dd></div>
         <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
         <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
       </dl>
@@ -1268,18 +1372,27 @@ function paintProfile() {
     ${
       vsMe
         ? `<button type="button" class="card profile__vs" data-profile-rivalry>
-            <span class="cell__stack"><span class="tile__title">Against you</span><span class="profile__vs-record">${esc(user.display_name)} is ${vsMe.wins}–${vsMe.losses} vs you</span></span>
+            <span class="cell__stack"><span class="tile__title">Against you</span><span class="profile__vs-record">${esc(user.display_name)} is ${wl(vsMe)} vs you</span></span>
             <span class="link">Open Rivalry</span></button>`
         : ''
     }
 
     <section class="card tile">
-      <h3 class="tile__title">Scoring</h3>
+      ${
+        isFifa()
+          ? `<h3 class="tile__title">Goals</h3>
+      <dl class="trio">
+        <div><dt>Avg For</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
+        <div><dt>Avg Against</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
+        <div><dt>Goal Diff</dt><dd class="${st.goalDiff >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.goalDiff, { signed: true })}</dd></div>
+      </dl>`
+          : `<h3 class="tile__title">Scoring</h3>
       <dl class="trio">
         <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
         <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
         <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
-      </dl>
+      </dl>`
+      }
     </section>
 
     <section class="card trend" data-profile-trend aria-labelledby="profile-trend-title"></section>
@@ -1298,9 +1411,9 @@ function paintProfile() {
         ${opps
           .map((o) => {
             const u = o.id === meId() ? state.me : opponents.get(o.id);
-            const cls = o.wins === o.losses ? '' : o.wins > o.losses ? 'is-win' : 'is-loss';
-            return `<li><button type="button" class="cell cell--plain friend-row" data-fp-sel="${esc(o.id)}" aria-label="${esc(label(o.id))}: ${winsLosses(o.wins, o.losses)}. Show this rivalry">${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${esc(label(o.id))}</span><span class="cell__sub">${u ? `@${esc(u.username)} · ` : ''}${o.games} ${o.games === 1 ? 'game' : 'games'}</span></span>
-              <span class="friend-row__record ${cls}">${o.wins}–${o.losses}</span></button></li>`;
+            const cls = recordClass(o);
+            return `<li><button type="button" class="cell cell--plain friend-row" data-fp-sel="${esc(o.id)}" aria-label="${esc(label(o.id))}: ${recLabel(o)}. Show this rivalry">${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${esc(label(o.id))}</span><span class="cell__sub">${u ? `@${esc(u.username)} · ` : ''}${o.games} ${o.games === 1 ? 'game' : 'games'}</span></span>
+              <span class="friend-row__record ${cls}">${wl(o)}</span></button></li>`;
           })
           .join('')}
       </ul>
@@ -1312,7 +1425,7 @@ function paintProfile() {
       .map((list, i) => {
         const r = record(list);
         return `<section class="group" aria-labelledby="pm-${i}">
-          <div class="group__head"><h2 id="pm-${i}">${monthLabel(list[0].date)}</h2><span class="group__record">${r.wins}–${r.losses}</span></div>
+          <div class="group__head"><h2 id="pm-${i}">${monthLabel(list[0].date)}</h2><span class="group__record">${wl(r)}</span></div>
           <ul class="list list--games" role="list">${list.map((g) => staticGameRow(g, sel ? null : opponents)).join('')}</ul>
         </section>`;
       })
@@ -1385,10 +1498,10 @@ function openOpponentPicker(currentId) {
             .map((f) => {
               const r = friendRecord(f.id);
               const on = f.id === currentId;
-              return `<li><button type="button" class="cell cell--button friend-row" data-opp="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}"${on ? ' aria-current="true"' : ''}>
+              return `<li><button type="button" class="cell cell--button friend-row" data-opp="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${recLabel(r)}"${on ? ' aria-current="true"' : ''}>
                 ${avatar(f, 'md')}
                 <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
-                <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
+                <span class="friend-row__record ${gamesIn(r) ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${gamesIn(r) ? wl(r) : 'New'}</span>
                 ${on ? icon('check', 'friend-row__check') : '<span class="friend-row__check" aria-hidden="true"></span>'}
               </button></li>`;
             })
@@ -1410,14 +1523,15 @@ function openOpponentPicker(currentId) {
 
 // ---------- team picker ----------
 
-function openTeamPicker(side, current, opponent = store.rival()) {
+function openTeamPicker(side, current, opponent = store.rival(), sport = state.mode) {
   return new Promise((resolve) => {
     const whose = side === 'myTeam' ? 'You' : opponent?.display_name || oppName();
-    const recent = recentTeams(opponent ? views(store.pairGames(opponent.id), meId()) : ui.views, side, 5);
+    const list = teamsFor(sport);
+    const recent = recentTeams(opponent ? views(store.pairGames(opponent.id), meId()) : ui.views, side, 5).filter((k) => list.includes(getTeam(k)));
     const cell = (team, lazy) => {
-      const selected = team.abbr === current;
-      return `<button type="button" class="team-cell${selected ? ' is-selected' : ''}" data-abbr="${team.abbr}" aria-label="${esc(team.name)}"${selected ? ' aria-current="true"' : ''}>
-        ${logo(team.abbr, { size: 'md', alt: '', lazy })}<span class="team-cell__abbr">${team.abbr}</span></button>`;
+      const selected = team.key === current;
+      return `<button type="button" class="team-cell${selected ? ' is-selected' : ''}" data-abbr="${team.key}" aria-label="${esc(team.name)}"${selected ? ' aria-current="true"' : ''}>
+        ${logo(team.key, { size: 'md', alt: '', lazy })}<span class="team-cell__abbr">${team.abbr}</span></button>`;
     };
 
     const content = document.createElement('div');
@@ -1431,13 +1545,13 @@ function openTeamPicker(side, current, opponent = store.rival()) {
       <div class="sheet__body picker">
         <div class="search">
           ${icon('search')}
-          <input type="search" id="team-search" placeholder="Search teams" aria-label="Search teams by city, name, or abbreviation" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+          <input type="search" id="team-search" placeholder="${sport === 'fifa' ? 'Search clubs and countries' : 'Search teams'}" aria-label="Search teams by city, name, or abbreviation" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
           <button type="button" class="search__clear" aria-label="Clear search" hidden>${icon('clear')}</button>
         </div>
         ${recent.length ? `<section class="picker__section" data-recent aria-labelledby="recent-teams"><h3 class="picker__label" id="recent-teams">Recent</h3><div class="team-grid">${recent.map((a) => cell(getTeam(a), false)).join('')}</div></section>` : ''}
         <section class="picker__section" aria-labelledby="all-teams">
           <h3 class="picker__label" id="all-teams">All Teams</h3>
-          <div class="team-grid" data-grid>${TEAMS.map((t) => cell(t, true)).join('')}</div>
+          <div class="team-grid" data-grid>${list.map((t) => cell(t, true)).join('')}</div>
           <p class="picker__empty" hidden></p>
         </section>
       </div>`;
@@ -1453,8 +1567,8 @@ function openTeamPicker(side, current, opponent = store.rival()) {
 
     const filter = () => {
       const q = search.value;
-      const matches = searchTeams(q);
-      const order = new Map(matches.map((t, i) => [t.abbr, i]));
+      const matches = searchTeams(q, list);
+      const order = new Map(matches.map((t, i) => [t.key, i]));
       for (const btn of grid.children) {
         const i = order.get(btn.dataset.abbr);
         btn.hidden = i === undefined;
@@ -1508,10 +1622,10 @@ function friendRow(f, { chevron = true, more = false, action = 'open-rival' } = 
   const r = friendRecord(f.id);
   const current = f.id === state.rivalId;
   const verb = action === 'open-profile' ? 'Open profile' : 'Open rivalry';
-  return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="${action}" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} ${verb}">
+  return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="${action}" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${recLabel(r)}.${current ? ' Current rivalry.' : ''} ${verb}">
     ${avatar(f, 'md')}
     <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
-    <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
+    <span class="friend-row__record ${gamesIn(r) ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${gamesIn(r) ? wl(r) : 'New'}</span>
     ${current && action === 'open-rival' ? icon('check', 'friend-row__check') : chevron && !more ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
   </button>${more ? `<button type="button" class="friend-more" data-action="friend-options" data-id="${esc(f.id)}" aria-label="More options for ${esc(f.display_name)}">${icon('more')}</button>` : ''}</li>`;
 }
@@ -1666,7 +1780,7 @@ async function openFriendOptions(friendId) {
 async function shareInvite() {
   const url = new URL('./', location.href).href;
   const me = state.me;
-  const text = `Let’s track our NBA 2K games on Dubs.${me ? ` Add me: @${me.username}` : ''}`;
+  const text = `Let’s track our NBA 2K and FIFA games on Dubs.${me ? ` Add me: @${me.username}` : ''}`;
   haptic('light');
   if (navigator.share) {
     try {
@@ -1773,7 +1887,7 @@ function render(detail = {}) {
   ui.views = views(pair, meId());
   ui.stats = computeStats(pair, meId());
   renderSync();
-  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId()]);
+  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode]);
   if (sig !== ui.signature) {
     ui.signature = sig;
     renderDashboard();
@@ -1782,7 +1896,7 @@ function render(detail = {}) {
     renderSidebarProfile();
   }
   // Don't rebuild Settings under the user's finger unless sync state changed
-  if (!$('#settings-content').contains(document.activeElement) || detail.status || detail.synced) renderSettings();
+  if (!$('#settings-content').contains(document.activeElement) || detail.status || detail.synced || detail.mode) renderSettings();
   if (detail.added) {
     for (const row of $$(`.row-wrap[data-id="${detail.added}"]`)) {
       row.classList.add('is-entering');
@@ -1806,7 +1920,8 @@ function onStoreChange(detail) {
     }
     return;
   }
-  if (detail.rival) (ui.shown = {}), (ui.calMonth = null); // new rivalry: fresh count-up, current month
+  if (detail.rival || detail.mode) (ui.shown = {}), (ui.calMonth = null); // new rivalry or game: fresh count-up, current month
+  if (detail.mode && fp.userId) paintProfile(); // an open profile follows the game mode
   if (detail.saved) {
     ui.justSaved = true;
     clearTimeout(savedTimer);

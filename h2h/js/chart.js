@@ -102,7 +102,7 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
     ${segmented('range', 'Time range', RANGES.map((r) => ({ value: r.id, label: r.id })), s.range.id)}
     <table class="visually-hidden"><caption>${esc(metric.label)} after each game, ${esc(s.range.phrase)}</caption>
       <thead><tr><th>Date</th><th>Result</th><th>${esc(metric.label)}</th></tr></thead>
-      <tbody>${s.series.slice(-60).map((p) => `<tr><td>${esc(p.game.date)}</td><td>${p.game.win ? 'Win' : 'Loss'} ${p.game.myScore}–${p.game.oppScore}</td><td>${esc(metric.fmt(p.v))}</td></tr>`).join('')}</tbody>
+      <tbody>${s.series.slice(-60).map((p) => `<tr><td>${esc(p.game.date)}</td><td>${p.game.win ? 'Win' : p.game.draw ? 'Draw' : 'Loss'} ${p.game.myScore}–${p.game.oppScore}</td><td>${esc(metric.fmt(p.v))}</td></tr>`).join('')}</tbody>
     </table>`;
 
   // Segmented controls (radio semantics: arrows move, Enter/Space/click select)
@@ -206,7 +206,7 @@ function drawPlot(host, s, titleId) {
     cursor.querySelector('circle').setAttribute('cy', cy);
     const g = p.game;
     const date = new Date(`${g.date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>${esc(date)} · ${g.win ? 'W' : 'L'} ${g.myScore}–${g.oppScore}${g.overtime ? ' OT' : ''}</span>`;
+    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>${esc(date)} · ${g.result} ${g.myScore}–${g.oppScore}${g.shootout ? ` (${g.myPens}–${g.oppPens} pens)` : g.overtime ? (g.sport === 'fifa' ? ' ET' : ' OT') : ''}</span>`;
     tip.hidden = false;
     const tw = tip.offsetWidth;
     tip.style.left = `${Math.min(Math.max(cx - tw / 2, 0), W - tw)}px`;
@@ -239,6 +239,8 @@ function drawPlot(host, s, titleId) {
 }
 
 const metricIsPct = (m) => m === METRICS.winPct;
+/** "5–3", or "5–1–3" (W–D–L) when there were draws. */
+const recText = (w, d, l) => (d ? `${w}–${d}–${l}` : `${w}–${l}`);
 
 // ---------- activity calendar ----------
 
@@ -249,7 +251,7 @@ const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
  * A normal month calendar. Days you played are tinted by who won the day (won / lost / split),
  * with one dot per game underneath the date (up to 3). ‹ › move between months, from the month of
  * your first game to this month. Tap or arrow-key a day to read it.
- *   days: Map 'YYYY-MM-DD' → { wins, losses }
+ *   days: Map 'YYYY-MM-DD' → { wins, draws, losses } (a day of only draws counts as split)
  *   opts: { month: Date (any day in it), onMonth(Date) }
  */
 export function renderMonthCalendar(host, days, { month, onMonth }) {
@@ -267,13 +269,13 @@ export function renderMonthCalendar(host, days, { month, onMonth }) {
   const weekdayNames = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'narrow' }));
   const fullWeekday = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'long' }));
 
-  let games = 0, wins = 0, losses = 0;
+  let games = 0, wins = 0, draws = 0, losses = 0;
   const cells = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(shown.getFullYear(), shown.getMonth(), d, 12);
     const rec = days.get(iso(date));
-    const n = rec ? rec.wins + rec.losses : 0;
-    if (n) (games += n), (wins += rec.wins), (losses += rec.losses);
+    const n = rec ? rec.wins + (rec.draws || 0) + rec.losses : 0;
+    if (n) (games += n), (wins += rec.wins), (draws += rec.draws || 0), (losses += rec.losses);
     const kind = !n ? 'none' : rec.wins > rec.losses ? 'win' : rec.losses > rec.wins ? 'loss' : 'split';
     cells.push({ d, date, rec, n, kind, future: date > today, today: iso(date) === iso(today) });
   }
@@ -282,13 +284,13 @@ export function renderMonthCalendar(host, days, { month, onMonth }) {
     const when = c.date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
     if (!c.n) return `${when}: no games`;
     const result = c.kind === 'win' ? 'you won the day' : c.kind === 'loss' ? 'you lost the day' : 'split';
-    return `${when}: ${c.n} ${c.n === 1 ? 'game' : 'games'}, ${result} ${c.rec.wins}–${c.rec.losses}`;
+    return `${when}: ${c.n} ${c.n === 1 ? 'game' : 'games'}, ${result} ${recText(c.rec.wins, c.rec.draws || 0, c.rec.losses)}`;
   };
 
   host.innerHTML = `
     <div class="cal__nav">
       <button type="button" class="cal__arrow" data-cal="-1" aria-label="Previous month"${canPrev ? '' : ' disabled'}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.75 8.25 12l6.25 6.25"/></svg></button>
-      <div class="cal__title"><span>${esc(title)}</span><span class="cal__summary">${games ? `${games} ${games === 1 ? 'game' : 'games'} · ${wins}–${losses}` : 'No games'}</span></div>
+      <div class="cal__title"><span>${esc(title)}</span><span class="cal__summary">${games ? `${games} ${games === 1 ? 'game' : 'games'} · ${recText(wins, draws, losses)}` : 'No games'}</span></div>
       <button type="button" class="cal__arrow" data-cal="1" aria-label="Next month"${canNext ? '' : ' disabled'}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button>
     </div>
     <div class="cal__grid" role="grid" aria-label="${esc(title)}">

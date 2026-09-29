@@ -26,6 +26,8 @@ const sampleGames = () => [
   ...generateSampleGames('u_alex', 'u_sam'),
   ...generateSampleGames('u_alex', 'u_jordan', { count: 12, seed: 7, startDaysAgo: 3, script: [false, true, true] }),
   ...generateSampleGames('u_sam', 'u_riley', { count: 9, seed: 99, startDaysAgo: 2 }),
+  ...generateSampleGames('u_alex', 'u_sam', { sport: 'fifa', count: 24, seed: 11, startDaysAgo: 0, script: [true, null, false] }),
+  ...generateSampleGames('u_alex', 'u_jordan', { sport: 'fifa', count: 8, seed: 5, startDaysAgo: 4 }),
 ];
 
 function load() {
@@ -78,10 +80,19 @@ function validateGame(g, meId, friendIds) {
   const opponent = players[0] === meId ? players[1] : players[1] === meId ? players[0] : null;
   if (!opponent || opponent === meId) return 'You can only log games you played in.';
   if (!friendIds.includes(opponent)) return 'You can only log games against your friends.';
+  const fifa = g.sport === 'fifa';
+  if (g.sport != null && g.sport !== '2k' && !fifa) return 'Unknown game mode.';
   const s1 = Number(g.player1_score), s2 = Number(g.player2_score);
-  if (![s1, s2].every((n) => Number.isInteger(n) && n >= 0 && n <= 999)) return 'Enter both scores.';
-  if (s1 === s2) return 'Basketball has no ties. Someone has to win.';
-  if (!getTeam(g.player1_team) || !getTeam(g.player2_team)) return 'Choose both teams.';
+  if (![s1, s2].every((n) => Number.isInteger(n) && n >= 0 && n <= (fifa ? 99 : 999))) return 'Enter both scores.';
+  if (!fifa && s1 === s2) return 'Basketball has no ties. Someone has to win.';
+  const hasPens = g.player1_pens != null && g.player1_pens !== '';
+  if (hasPens) {
+    const p1 = Number(g.player1_pens), p2 = Number(g.player2_pens);
+    if (!fifa || s1 !== s2) return 'Penalties are only for level FIFA games.';
+    if (![p1, p2].every((n) => Number.isInteger(n) && n >= 0 && n <= 99) || p1 === p2) return 'A shootout needs a winner.';
+  }
+  const team = (t) => getTeam(t) && String(t).startsWith('F-') === fifa;
+  if (!team(g.player1_team) || !team(g.player2_team)) return 'Choose both teams.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(g.date || '')) return 'Choose a date.';
   return null;
 }

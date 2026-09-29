@@ -10,6 +10,7 @@
 // - Fetches re-apply anything still in the outbox, so a poll never "undoes" a pending change.
 import { uuid, sha256 } from './crypto.js';
 import * as api from './api.js';
+import { sportOf } from './stats.js';
 import { CONFIG } from '../config.js';
 
 // Keys are namespaced by backend, so demo data never mixes with the real Sheet.
@@ -41,6 +42,7 @@ export const state = {
   lastSynced: null,
   status: 'idle', // 'idle' | 'syncing' | 'offline' | 'error'
   error: null,
+  mode: '2k', // '2k' | 'fifa': which game's stats the app shows (see decideMode)
 };
 let outbox = [];
 
@@ -71,6 +73,8 @@ function loadAccount(userId) {
   state.lastSynced = c.lastSynced || null;
   outbox = read(K.outbox(userId), []);
   rebuild();
+  modeDecided = false;
+  decideMode();
   pickRival();
 }
 
@@ -92,7 +96,30 @@ function rebuild() {
   state.games = [...byId.values()].filter((g) => !g.deleted);
 }
 
-if (state.session) loadAccount(state.session.userId);
+
+// ---------- game mode ----------
+
+// The app opens on the sport of your most recent game, so if you last played FIFA it opens on
+// FIFA. With no games yet it uses the last mode picked in Settings. Decided once per launch;
+// switching in Settings takes over for the rest of the session.
+let modeDecided = false;
+function decideMode() {
+  if (modeDecided) return;
+  const me = state.session?.userId;
+  const mine = state.games.filter((g) => g.player1_id === me || g.player2_id === me);
+  const latest = mine.sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)))[0];
+  state.mode = latest ? sportOf(latest) : getPrefs().mode === 'fifa' ? 'fifa' : '2k';
+  modeDecided = Boolean(latest) || state.loaded;
+}
+
+export function setMode(mode) {
+  const next = mode === 'fifa' ? 'fifa' : '2k';
+  modeDecided = true;
+  setPrefs({ mode: next });
+  if (state.mode === next) return;
+  state.mode = next;
+  emit({ mode: true });
+}
 
 // ---------- selectors ----------
 
@@ -100,10 +127,10 @@ export const pendingCount = () => outbox.length;
 export const rival = () => state.friends.find((f) => f.id === state.rivalId) || null;
 const opponentOf = (g, me) => (g.player1_id === me ? g.player2_id : g.player1_id);
 
-/** Games between you and one friend (defaults to the current rival). */
+/** Games between you and one friend (defaults to the current rival) in the current game mode. */
 export function pairGames(friendId = state.rivalId) {
   const me = state.session?.userId;
-  return state.games.filter((g) => (g.player1_id === me || g.player2_id === me) && opponentOf(g, me) === friendId);
+  return state.games.filter((g) => sportOf(g) === state.mode && (g.player1_id === me || g.player2_id === me) && opponentOf(g, me) === friendId);
 }
 
 /** Keeps the rival valid: last choice → most recently played friend → first friend. */
@@ -271,7 +298,7 @@ const now = () => new Date().toISOString();
 /** `game` is neutral (player1/player2). Returns the stored game. */
 export function addGame(game) {
   const stamp = now();
-  const full = { ...game, id: uuid(), created_by: state.session.userId, created_at: stamp, updated_at: stamp, deleted: false };
+  const full = { sport: state.mode, ...game, id: uuid(), created_by: state.session.userId, created_at: stamp, updated_at: stamp, deleted: false };
   queue(full, { isNew: true });
   emit({ added: full.id });
   sync();
@@ -358,6 +385,7 @@ async function syncOnce() {
     Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
     rememberAccount(me);
     rebuild();
+    decideMode();
     pickRival();
     persistCache();
     setStatus('idle');
@@ -381,3 +409,6 @@ export function startAutoSync() {
 }
 window.addEventListener('online', () => sync());
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && sync());
+
+// Last, so everything above (prefs, game mode) is defined before the cached account loads
+if (state.session) loadAccount(state.session.userId);

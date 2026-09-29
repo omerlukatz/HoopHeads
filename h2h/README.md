@@ -62,6 +62,11 @@ When you ship changes, bump `VERSION` in `sw.js`.
   - You can only log or edit games between yourself and a friend.
   - The phone stays signed in. **Require PIN on Open** in Settings re-asks for the PIN on launch
     (checked on-device, so it works offline).
+- **Two games: NBA 2K and FIFA.** Every game has a `sport` (`2k` or `fifa`; empty = 2K). Settings →
+  Game Mode picks which one the app shows, and it opens on whichever game you logged last. The screens
+  are the same; FIFA swaps in draws (W–D–L), goals and goal difference, extra time (ET), penalty
+  shootouts (PEN, stored as `player1_pens` / `player2_pens`), 1-goal games and clean sheets. FIFA
+  teams are stored as `F-` + code (e.g. `F-ARS`) and show the code on the club colour until badges are added.
 - **Soft deletes.** Deleting sets `deleted = TRUE` in the Sheet. Undo sets it back.
 
 ## Project layout

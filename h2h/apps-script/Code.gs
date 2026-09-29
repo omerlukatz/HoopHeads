@@ -8,7 +8,8 @@
  *   Friendships: id, user_a, user_b, created_at
  *   Blocks:      id, blocker, blocked, created_at
  *   Games:       id, date, player1_id, player2_id, player1_score, player2_score, player1_team,
- *                player2_team, overtime, note, created_by, created_at, updated_at, deleted
+ *                player2_team, overtime, note, created_by, created_at, updated_at, deleted,
+ *                sport ('2k' or 'fifa'; empty = 2k), player1_pens, player2_pens (FIFA shootouts)
  *
  * API (every response is JSON: { ok: true, data } or { ok: false, error, code })
  *   GET  ?action=me&token=...                  -> your user
@@ -45,7 +46,7 @@ const SHEETS = {
   Users: ['id', 'username', 'display_name', 'pin_hash', 'color', 'initial', 'created_at', 'avatar'],
   Friendships: ['id', 'user_a', 'user_b', 'created_at'],
   Blocks: ['id', 'blocker', 'blocked', 'created_at'],
-  Games: ['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score', 'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at', 'updated_at', 'deleted'],
+  Games: ['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score', 'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at', 'updated_at', 'deleted', 'sport', 'player1_pens', 'player2_pens'],
 };
 const TEAMS = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK', 'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS'];
 // Avatar colours: all dark enough for a white initial (WCAG AA)
@@ -583,6 +584,7 @@ function addGame_(me, game) {
   return withLock_(function () {
     const clean = cleanGame_(game, me);
     const sheet = sheet_('Games');
+    ['sport', 'player1_pens', 'player2_pens'].forEach(function (c) { ensureColumn_(sheet, c); }); // added with FIFA
     const existing = findGameRow_(sheet, clean.id);
     const now = new Date().toISOString();
     if (existing) {
@@ -599,6 +601,7 @@ function updateGame_(me, game) {
   return withLock_(function () {
     const clean = cleanGame_(game, me);
     const sheet = sheet_('Games');
+    ['sport', 'player1_pens', 'player2_pens'].forEach(function (c) { ensureColumn_(sheet, c); }); // added with FIFA
     const existing = findGameRow_(sheet, clean.id);
     if (!existing) throw apiError_('That game no longer exists.', 'invalid');
     const prev = normalizeGame_(existing.data);
@@ -640,11 +643,23 @@ function cleanGame_(g, me) {
   const opponent = players[0] === me.id ? players[1] : players[1] === me.id ? players[0] : null;
   if (!opponent || opponent === me.id) throw apiError_('You can only log games you played in.', 'invalid');
   if (friendIds_(me.id).indexOf(opponent) === -1) throw apiError_('You can only log games against your friends.', 'invalid');
+  const sport = g.sport == null || g.sport === '' ? '2k' : String(g.sport);
+  if (sport !== '2k' && sport !== 'fifa') throw apiError_('Unknown game mode.', 'invalid');
+  const fifa = sport === 'fifa';
   const s1 = Number(g.player1_score), s2 = Number(g.player2_score);
-  if (![s1, s2].every(function (n) { return Number.isInteger(n) && n >= 0 && n <= 999; })) throw apiError_('Enter both scores.', 'invalid');
-  if (s1 === s2) throw apiError_('Basketball has no ties. Someone has to win.', 'invalid');
-  const t1 = String(g.player1_team || '').toUpperCase(), t2 = String(g.player2_team || '').toUpperCase();
-  if (TEAMS.indexOf(t1) === -1 || TEAMS.indexOf(t2) === -1) throw apiError_('Choose both teams.', 'invalid');
+  if (![s1, s2].every(function (n) { return Number.isInteger(n) && n >= 0 && n <= (fifa ? 99 : 999); })) throw apiError_('Enter both scores.', 'invalid');
+  if (!fifa && s1 === s2) throw apiError_('Basketball has no ties. Someone has to win.', 'invalid');
+  let p1 = '', p2 = '';
+  if (g.player1_pens != null && g.player1_pens !== '') {
+    p1 = Number(g.player1_pens); p2 = Number(g.player2_pens);
+    if (!fifa || s1 !== s2) throw apiError_('Penalties are only for level FIFA games.', 'invalid');
+    if (![p1, p2].every(function (n) { return Number.isInteger(n) && n >= 0 && n <= 99; }) || p1 === p2) throw apiError_('A shootout needs a winner.', 'invalid');
+  }
+  // NBA teams are 3-letter codes; FIFA teams are "F-" + code (e.g. F-ARS)
+  const t1 = fifa ? String(g.player1_team || '') : String(g.player1_team || '').toUpperCase();
+  const t2 = fifa ? String(g.player2_team || '') : String(g.player2_team || '').toUpperCase();
+  const validTeam = function (t) { return fifa ? /^F-[A-Z0-9]{2,4}$/.test(t) : TEAMS.indexOf(t) !== -1; };
+  if (!validTeam(t1) || !validTeam(t2)) throw apiError_('Choose both teams.', 'invalid');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(g.date || ''))) throw apiError_('Choose a date.', 'invalid');
   return {
     id: id,
@@ -657,6 +672,9 @@ function cleanGame_(g, me) {
     player2_team: t2,
     overtime: g.overtime === true,
     note: String(g.note || '').slice(0, 120),
+    sport: sport,
+    player1_pens: p1,
+    player2_pens: p2,
   };
 }
 
@@ -680,6 +698,9 @@ function normalizeGame_(r) {
     created_at: text(r.created_at),
     updated_at: text(r.updated_at),
     deleted: bool(r.deleted),
+    sport: String(r.sport || '') === 'fifa' ? 'fifa' : '2k',
+    player1_pens: r.player1_pens === '' || r.player1_pens == null ? '' : Number(r.player1_pens),
+    player2_pens: r.player2_pens === '' || r.player2_pens == null ? '' : Number(r.player2_pens),
   };
 }
 

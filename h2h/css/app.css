@@ -663,8 +663,9 @@ img { display: block; max-width: 100%; }
 .pill--w { background: var(--win-tint); color: var(--win-text); }
 .pill--l { background: var(--loss-tint); color: var(--loss-text); }
 .pill--ot { background: var(--ot-tint); color: var(--ot-text); }
+.pill--d { background: var(--fill); color: var(--label-2); }
 /* Fixed width, W/L last: every W and L lines up at the right edge, with the O to its left */
-.row__pills { display: inline-flex; justify-content: flex-end; gap: 4px; width: 56px; justify-self: end; }
+.row__pills { display: inline-flex; justify-content: flex-end; gap: 4px; width: 64px; justify-self: end; }
 
 .is-win { color: var(--win-text); }
 .is-loss { color: var(--loss-text); }
@@ -1950,3 +1951,31 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .avatar-pick[aria-checked="true"] { box-shadow: 0 0 0 3px var(--sheet-card), 0 0 0 5px var(--accent); }
 .avatar-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
 .profile-form > * { flex: none; } /* the sheet scrolls; nothing gets squashed */
+
+/* ============ Game mode (Settings) ============ */
+
+.mode-card { padding: 12px; }
+.seg--large { height: 40px; }
+.seg--large .seg__thumb { border-radius: 8px; }
+.seg--large .seg__item { font-size: var(--fs-subhead); }
+
+/* FIFA penalty shootout, shown when a game is level after extra time */
+.pens-row__label { flex: none; }
+.pens-row__inputs { display: flex; align-items: center; gap: 8px; color: var(--label-3); }
+.pens-input {
+  width: 64px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--label);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  text-align: center;
+}
+.pens-input::placeholder { color: var(--label-3); font-weight: 500; font-size: var(--fs-footnote); }
+.pens-input:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* FIFA's W–D–L record has three numbers, so it's a little smaller to fit */
+.record--wdl { font-size: 40px; }
+.teams__record { white-space: nowrap; }

@@ -1,7 +1,7 @@
 {
   "name": "Dubs — NBA 2K Rivalries",
   "short_name": "Dubs",
-  "description": "Log every NBA 2K game against your friends and see who’s really better.",
+  "description": "Log every NBA 2K and FIFA game against your friends and see who’s really better.",
   "start_url": "./#dashboard",
   "scope": "./",
   "display": "standalone",

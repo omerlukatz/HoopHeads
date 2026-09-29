@@ -88,7 +88,7 @@ function renderWelcome(message = '') {
     <div class="lock__center">
       <img class="lock__icon" src="assets/icons/icon-192.png" alt="" width="64" height="64">
       <h1 class="lock__title">Dubs</h1>
-      <p class="lock__sub">Your 2K rivalries, tracked.</p>
+      <p class="lock__sub">Your 2K &amp; FIFA rivalries, tracked.</p>
       ${message ? `<p class="lock__notice" role="status">${esc(message)}</p>` : ''}
       ${
         accounts.length
