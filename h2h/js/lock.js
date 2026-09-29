@@ -20,8 +20,14 @@ let resolveUnlock = null;
 let keyHandler = null;
 let countdown = null;
 
+/** Picture avatars a01…a20 (assets/avatars). A user without one shows their initial instead. */
+export const AVATARS = Array.from({ length: 20 }, (_, i) => `a${String(i + 1).padStart(2, '0')}`);
+const isAvatar = (id) => AVATARS.includes(id);
+
 export const avatar = (user, size = 'md') =>
-  `<span class="avatar avatar--${size}" style="--avatar:${esc(user?.color || '#8E8E93')}" aria-hidden="true">${esc(user?.initial || user?.display_name?.[0] || '?')}</span>`;
+  isAvatar(user?.avatar)
+    ? `<span class="avatar avatar--${size} avatar--img" aria-hidden="true"><img src="assets/avatars/${user.avatar}.webp" alt="" width="256" height="256" decoding="async" draggable="false"></span>`
+    : `<span class="avatar avatar--${size}" style="--avatar:${esc(user?.color || '#8E8E93')}" aria-hidden="true">${esc(user?.initial || user?.display_name?.[0] || '?')}</span>`;
 
 export function isLocked() {
   return root().classList.contains('is-shown');

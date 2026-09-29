@@ -1,7 +1,7 @@
 // Service worker: network-first for the app shell (always fresh when online, works offline),
 // cache-first for logos and icons (they never change between releases).
 // Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v15';
+const VERSION = 'h2h-v16';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'css/tokens.css', 'css/app.css',
@@ -11,9 +11,10 @@ const SHELL = [
 const TEAMS = ['atl','bos','bkn','cha','chi','cle','dal','den','det','gsw','hou','ind','lac','lal','mem',
   'mia','mil','min','nop','nyk','okc','orl','phi','phx','por','sac','sas','tor','uta','was'];
 const LOGOS = TEAMS.map((t) => `assets/logos/${t}.webp`);
+const AVATARS = Array.from({ length: 20 }, (_, i) => `assets/avatars/a${String(i + 1).padStart(2, '0')}.webp`);
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll([...SHELL, ...LOGOS])).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll([...SHELL, ...LOGOS, ...AVATARS])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

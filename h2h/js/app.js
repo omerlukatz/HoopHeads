@@ -4,7 +4,7 @@ import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
-import { showLock, isLocked, avatar, changePinFlow } from './lock.js';
+import { showLock, isLocked, avatar, AVATARS, changePinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -712,21 +712,46 @@ function openProfileSheet() {
       <button type="submit" form="profile-form" class="btn-text btn-text--strong" data-sheet="save">Save</button>
     </header>
     <form id="profile-form" class="sheet__body profile-form" novalidate autocomplete="off">
-      <div class="profile-form__avatar">${avatar(me, 'xl')}</div>
+      <div class="profile-form__avatar" data-avatar-preview>${avatar(me, 'xl')}</div>
       <ul class="list list--form" role="list">
         <li class="cell"><label for="pf-name">Name</label><input id="pf-name" name="displayName" class="cell__input" value="${esc(me.display_name)}" maxlength="24" autocomplete="nickname" enterkeyhint="next" required></li>
         <li class="cell"><label for="pf-username">Username</label><span class="cell__input-group"><span class="cell__prefix" aria-hidden="true">@</span><input id="pf-username" name="username" class="cell__input" value="${esc(me.username)}" maxlength="20" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" required></span></li>
       </ul>
       <p class="auth-help">Usernames are 3–20 letters, numbers, dots or underscores. Friends can find you by either one.</p>
+      <div class="group__head"><h3 id="pf-avatar-title">Profile Picture</h3></div>
+      <div class="list avatar-grid" role="radiogroup" aria-labelledby="pf-avatar-title">
+        ${['', ...AVATARS]
+          .map(
+            (id, i) => `<button type="button" class="avatar-pick" role="radio" data-pick-avatar="${id}" aria-checked="${id === (me.avatar || '')}" aria-label="${id ? `Avatar ${i}` : 'Your initial'}">${avatar({ ...me, avatar: id }, 'lg')}</button>`,
+          )
+          .join('')}
+      </div>
       <p class="auth-error" role="alert"></p>
     </form>`;
   const form = $('form', content);
   const err = $('.auth-error', content);
-  const avatarEl = $('.profile-form__avatar .avatar', content);
+  let picked = me.avatar || '';
+  // The preview (and the "initial" choice) follow the name as you type it
+  const draftUser = () => {
+    const name = form.displayName.value.trim();
+    return { ...me, display_name: name, initial: (name[0] || '?').toUpperCase() };
+  };
+  const paintAvatars = () => {
+    $('[data-avatar-preview]', content).innerHTML = avatar({ ...draftUser(), avatar: picked }, 'xl');
+    $('[data-pick-avatar=""]', content).innerHTML = avatar({ ...draftUser(), avatar: '' }, 'lg');
+  };
   form.username.addEventListener('input', () => {
     form.username.value = form.username.value.toLowerCase().replace(/[^a-z0-9_.]/g, '');
   });
-  form.displayName.addEventListener('input', () => (avatarEl.textContent = (form.displayName.value.trim()[0] || '?').toUpperCase()));
+  form.displayName.addEventListener('input', paintAvatars);
+  content.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-pick-avatar]');
+    if (!btn) return;
+    haptic('light');
+    picked = btn.dataset.pickAvatar;
+    $$('[data-pick-avatar]', content).forEach((b) => b.setAttribute('aria-checked', String(b === btn)));
+    paintAvatars();
+  });
 
   const sheet = openSheet({ content, labelledBy: 'profile-title', initialFocus: '#pf-name' });
   content.addEventListener('click', (e) => e.target.closest('[data-sheet="cancel"]') && sheet.close());
@@ -739,6 +764,7 @@ function openProfileSheet() {
     const patch = {};
     if (displayName !== me.display_name) patch.displayName = displayName;
     if (username !== me.username) patch.username = username;
+    if (picked !== (me.avatar || '')) patch.avatar = picked;
     if (!Object.keys(patch).length) return sheet.close();
     const save = $('[data-sheet="save"]', content);
     save.disabled = true;

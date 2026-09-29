@@ -92,7 +92,7 @@ export function createDemoBackend(ApiError) {
     await delay();
     if (controls.offline || !navigator.onLine) throw new ApiError('You’re offline.', 'network');
   };
-  const pub = ({ id, username, display_name, color, initial }) => ({ id, username, display_name: niceName(display_name), color, initial: String(initial || '?').toUpperCase() });
+  const pub = ({ id, username, display_name, color, initial, avatar }) => ({ id, username, display_name: niceName(display_name), color, initial: String(initial || '?').toUpperCase(), avatar: avatar || '' });
   const me = (s, token) => {
     const user = s.users.find((u) => u.id === s.sessions[token]);
     if (!user) throw new ApiError('Your session has ended. Sign in again.', 'auth');
@@ -163,7 +163,7 @@ export function createDemoBackend(ApiError) {
       return pub(me(load(), token));
     },
 
-    async updateProfile(token, { username, displayName } = {}) {
+    async updateProfile(token, { username, displayName, avatar } = {}) {
       await net();
       const s = load();
       const user = me(s, token);
@@ -178,6 +178,10 @@ export function createDemoBackend(ApiError) {
         if (!display || display.length > 24) throw new ApiError('Enter a name up to 24 characters.', 'invalid');
         user.display_name = display;
         user.initial = display[0].toUpperCase();
+      }
+      if (avatar != null) {
+        if (avatar && !/^a\d{2}$/.test(avatar)) throw new ApiError('Pick one of the avatars.', 'invalid');
+        user.avatar = avatar;
       }
       save(s);
       return pub(user);

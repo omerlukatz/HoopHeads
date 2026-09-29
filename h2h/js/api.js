@@ -5,7 +5,7 @@
 //   getMe(token)                        -> user
 //   getFriends(token)                   -> [user]
 //   searchUsers(token, query)           -> [user & { isFriend }]
-//   updateProfile(token, patch)         -> user    (patch: { username?, displayName? })
+//   updateProfile(token, patch)         -> user    (patch: { username?, displayName?, avatar? })
 //   changePin(token, currentPin, newPin) -> { token } (other devices are signed out)
 //   addFriend(token, userId)            -> user (instant, safe to repeat)
 //   removeFriend(token, userId)         -> {}      (games are kept)
@@ -78,7 +78,7 @@ const remote = {
   getMe: (token) => call('GET', { action: 'me', token }),
   getFriends: (token) => call('GET', { action: 'friends', token }),
   searchUsers: (token, q) => call('GET', { action: 'search', token, q }),
-  updateProfile: (token, { username, displayName } = {}) => call('POST', { action: 'updateProfile', token, username, displayName }),
+  updateProfile: (token, { username, displayName, avatar } = {}) => call('POST', { action: 'updateProfile', token, username, displayName, avatar }),
   changePin: (token, currentPin, newPin) => call('POST', { action: 'changePin', token, currentPin, newPin }),
   addFriend: (token, userId) => call('POST', { action: 'addFriend', token, userId }),
   removeFriend: (token, userId) => call('POST', { action: 'removeFriend', token, userId }),

@@ -189,7 +189,7 @@ export function signOut({ expired = false } = {}) {
   emit({ session: true, expired });
 }
 
-/** Change name and/or username. Needs a connection. */
+/** Change name, username and/or avatar. Needs a connection. */
 export async function updateProfile(patch) {
   const user = tidy(await api.updateProfile(state.session.token, patch));
   const oldId = state.me?.id;

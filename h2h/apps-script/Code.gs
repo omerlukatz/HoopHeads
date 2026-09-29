@@ -20,7 +20,7 @@
  *   POST { action: 'signUp', username, displayName, pin }  -> { token, user }
  *   POST { action: 'signIn', username, pin }               -> { token, user }
  *   POST { action: 'signOut', token }                      -> {}
- *   POST { action: 'updateProfile', token, username?, displayName? } -> user
+ *   POST { action: 'updateProfile', token, username?, displayName?, avatar? } -> user
  *   POST { action: 'changePin', token, currentPin, newPin }  -> { token } (other devices are signed out)
  *   POST { action: 'addFriend', token, userId }            -> friend (instant; safe to repeat)
  *   POST { action: 'removeFriend', token, userId }         -> {} (games are kept)
@@ -42,7 +42,7 @@
  */
 
 const SHEETS = {
-  Users: ['id', 'username', 'display_name', 'pin_hash', 'color', 'initial', 'created_at'],
+  Users: ['id', 'username', 'display_name', 'pin_hash', 'color', 'initial', 'created_at', 'avatar'],
   Friendships: ['id', 'user_a', 'user_b', 'created_at'],
   Blocks: ['id', 'blocker', 'blocked', 'created_at'],
   Games: ['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score', 'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at', 'updated_at', 'deleted'],
@@ -101,6 +101,136 @@ function signOutEverywhere() {
   Logger.log('All sessions ended.');
 }
 
+/**
+ * Product testing: adds 3 random test players (usernames start with "test_"), makes them friends
+ * with each other and with YOUR_USERNAME, and logs ~3 months of games between the three of them.
+ * Your own games aren't touched. Optional: put a 4-digit TEST_PIN in to be able to sign in as them.
+ * Run removeTestPlayers to delete all of it again.
+ */
+function seedTestPlayers() {
+  const YOUR_USERNAME = 'omer';
+  const TEST_PIN = '';
+  if (TEST_PIN && !/^\d{4}$/.test(TEST_PIN)) throw new Error('TEST_PIN must be exactly 4 digits (or empty).');
+  const you = findUserByUsername_(YOUR_USERNAME);
+  if (!you) throw new Error('No user named ' + YOUR_USERNAME + '. Fix YOUR_USERNAME at the top of seedTestPlayers.');
+
+  const NAMES = ['Marcus', 'Tyler', 'Jalen', 'Devin', 'Chris', 'Isaiah', 'Andre', 'Malik', 'Noah', 'Eli', 'Darius', 'Kobe', 'Luka', 'Zion', 'Trey', 'Miles', 'Jamal', 'Nico', 'Omar', 'Leo'];
+  const taken = readObjects_(sheet_('Users')).map(function (u) { return String(u.username).toLowerCase(); });
+  const pool = NAMES.filter(function (n) { return taken.indexOf('test_' + n.toLowerCase()) === -1; });
+  if (pool.length < 3) throw new Error('Not enough unused test names. Run removeTestPlayers first.');
+  shuffle_(pool);
+  const now = new Date().toISOString();
+  ensureColumn_(sheet_('Users'), 'avatar');
+  const faces = shuffle_(Array.from({ length: 20 }, function (_, i) { return 'a' + ('0' + (i + 1)).slice(-2); }));
+
+  withLock_(function () {
+    // Each player gets a hidden skill level, so some rivalries are one-sided and some are close
+    const players = pool.slice(0, 3).map(function (name, i) {
+      const id = 'u_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+      const user = {
+        id: id,
+        username: 'test_' + name.toLowerCase(),
+        display_name: name,
+        pin_hash: TEST_PIN ? hash_(id, TEST_PIN) : '',
+        color: AVATAR_COLORS[(i * 3 + Math.floor(Math.random() * AVATAR_COLORS.length)) % AVATAR_COLORS.length],
+        initial: name.charAt(0),
+        created_at: now,
+        avatar: faces[i],
+      };
+      appendRow_(sheet_('Users'), user);
+      return { user: user, skill: 0.35 + Math.random() * 0.3, teams: pickTeams_(3) };
+    });
+
+    const friendships = sheet_('Friendships');
+    const befriend = function (a, b) {
+      const pair = [a, b].sort();
+      appendRow_(friendships, { id: Utilities.getUuid(), user_a: pair[0], user_b: pair[1], created_at: now });
+    };
+    players.forEach(function (p, i) {
+      befriend(p.user.id, you.user.id);
+      players.slice(i + 1).forEach(function (q) { befriend(p.user.id, q.user.id); });
+    });
+
+    const NOTES = ['Down 15 at the half', 'Buzzer beater', 'Controller died in the 4th', 'Rematch game', 'Best of 3, game 1', 'Best of 3, game 2', 'Lag in the 2nd half', 'Triple double'];
+    const rows = [];
+    const headers = SHEETS.Games;
+    for (let i = 0; i < players.length; i++) {
+      for (let j = i + 1; j < players.length; j++) {
+        const a = players[i], b = players[j];
+        const count = 10 + Math.floor(Math.random() * 14);
+        const pWin = a.skill / (a.skill + b.skill);
+        for (let k = 0; k < count; k++) {
+          const day = new Date(Date.now() - Math.floor(Math.random() * 90) * 86400000);
+          const aWins = Math.random() < pWin;
+          const overtime = Math.random() < 0.12;
+          const margin = overtime ? 1 + Math.floor(Math.random() * 6) : 1 + Math.floor(Math.random() * Math.random() * 30);
+          const loser = 78 + Math.floor(Math.random() * 38) + (overtime ? 8 : 0);
+          const g = {
+            id: Utilities.getUuid(),
+            date: Utilities.formatDate(day, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+            player1_id: a.user.id,
+            player2_id: b.user.id,
+            player1_score: aWins ? loser + margin : loser,
+            player2_score: aWins ? loser : loser + margin,
+            player1_team: pick_(Math.random() < 0.7 ? a.teams : TEAMS),
+            player2_team: pick_(Math.random() < 0.7 ? b.teams : TEAMS),
+            overtime: overtime ? 'TRUE' : 'FALSE',
+            note: Math.random() < 0.15 ? pick_(NOTES) : '',
+            created_by: Math.random() < 0.5 ? a.user.id : b.user.id,
+            created_at: now,
+            updated_at: now,
+            deleted: 'FALSE',
+          };
+          rows.push(headers.map(function (h) { return String(g[h]); }));
+        }
+      }
+    }
+    const games = sheet_('Games');
+    const cols = games.getRange(1, 1, 1, games.getLastColumn()).getValues()[0];
+    const ordered = rows.map(function (r) { return cols.map(function (c) { const i = headers.indexOf(c); return i === -1 ? '' : r[i]; }); });
+    games.getRange(games.getLastRow() + 1, 1, ordered.length, cols.length).setNumberFormat('@').setValues(ordered);
+    Logger.log('Added ' + players.map(function (p) { return p.user.display_name + ' (@' + p.user.username + ')'; }).join(', ') +
+      ' with ' + ordered.length + ' games between them. They are now friends with @' + you.user.username + '.' +
+      (TEST_PIN ? ' They can sign in with the TEST_PIN.' : ''));
+  });
+}
+
+/** Deletes every test_ player plus their friendships and games. Real players' data is untouched. */
+function removeTestPlayers() {
+  withLock_(function () {
+    const users = sheet_('Users');
+    const testRows = readRows_(users).filter(function (r) { return String(r.data.username).indexOf('test_') === 0; });
+    const ids = testRows.map(function (r) { return r.data.id; });
+    if (!ids.length) return Logger.log('No test players to remove.');
+    const isTest = function (id) { return ids.indexOf(String(id)) !== -1; };
+    const removeRows = function (sheet, test) {
+      const rows = readRows_(sheet).filter(function (r) { return test(r.data); });
+      rows.reverse().forEach(function (r) { sheet.deleteRow(r.row); }); // bottom-up keeps row numbers valid
+      return rows.length;
+    };
+    const games = removeRows(sheet_('Games'), function (g) { return isTest(g.player1_id) || isTest(g.player2_id); });
+    removeRows(sheet_('Friendships'), function (f) { return isTest(f.user_a) || isTest(f.user_b); });
+    removeRows(sheet_('Blocks'), function (b) { return isTest(b.blocker) || isTest(b.blocked); });
+    ids.forEach(endSessionsFor_);
+    removeRows(users, function (u) { return isTest(u.id); });
+    Logger.log('Removed ' + ids.length + ' test players and ' + games + ' games.');
+  });
+}
+
+function pick_(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+function shuffle_(list) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = list[i]; list[i] = list[j]; list[j] = t;
+  }
+  return list;
+}
+function pickTeams_(n) {
+  return shuffle_(TEAMS.slice()).slice(0, n);
+}
+
 /* =====================================================================
  * HTTP ENTRY POINTS
  * ===================================================================== */
@@ -129,7 +259,7 @@ function doPost(e) {
       case 'signUp': return signUp_(body.username, body.displayName, body.pin);
       case 'signIn': return signIn_(body.username, body.pin);
       case 'signOut': return signOut_(body.token);
-      case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName);
+      case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName, body.avatar);
       case 'changePin': return changePin_(requireSession_(body.token), body.currentPin, body.newPin);
       case 'addFriend': return addFriend_(requireSession_(body.token), body.userId);
       case 'removeFriend': return removeFriend_(requireSession_(body.token), body.userId);
@@ -204,7 +334,7 @@ function signIn_(username, pin) {
   });
 }
 
-function updateProfile_(me, username, displayName) {
+function updateProfile_(me, username, displayName, avatar) {
   return withLock_(function () {
     const found = findUserByUsername_(me.username);
     if (!found) throw apiError_('This account no longer exists.', 'auth');
@@ -222,7 +352,13 @@ function updateProfile_(me, username, displayName) {
       next.display_name = display;
       next.initial = display.charAt(0).toUpperCase();
     }
-    writeRow_(sheet_('Users'), found.row, next);
+    if (avatar != null) {
+      if (avatar && !/^a\d{2}$/.test(String(avatar))) throw apiError_('Pick one of the avatars.', 'invalid');
+      next.avatar = String(avatar);
+    }
+    const users = sheet_('Users');
+    ensureColumn_(users, 'avatar'); // sheets made before avatars existed don't have the column yet
+    writeRow_(users, found.row, next);
     return publicUser_(next);
   });
 }
@@ -313,7 +449,7 @@ function hash_(userId, pin) {
 
 function publicUser_(u) {
   const name = niceName_(u.display_name);
-  return { id: u.id, username: u.username, display_name: name, color: u.color || '#5856D6', initial: String(u.initial || name.charAt(0) || '?').toUpperCase() };
+  return { id: u.id, username: u.username, display_name: name, color: u.color || '#5856D6', initial: String(u.initial || name.charAt(0) || '?').toUpperCase(), avatar: String(u.avatar || '') };
 }
 
 function findUserByUsername_(username) {
@@ -596,6 +732,14 @@ function writeRow_(sheet, rowNumber, obj) {
   });
   sheet.getRange(rowNumber, 1, 1, row.length).setNumberFormat('@').setValues([row]);
   return obj;
+}
+
+/** Adds a header column at the end if it's missing. */
+function ensureColumn_(sheet, name) {
+  if (colIndex_(sheet, name)) return;
+  const col = sheet.getLastColumn() + 1;
+  sheet.getRange(1, col).setValue(name);
+  sheet.getRange(1, col, sheet.getMaxRows(), 1).setNumberFormat('@');
 }
 
 function appendRow_(sheet, obj) {

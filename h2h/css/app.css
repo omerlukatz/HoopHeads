@@ -1924,3 +1924,29 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 }
 .rchip[aria-pressed="true"] { background: var(--accent-fill); color: #fff; }
 .rchip:focus-visible { box-shadow: var(--focus); }
+
+/* ============ Avatars ============ */
+
+.avatar--img { background: var(--fill); overflow: hidden; }
+.avatar--img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+.profile-form .group__head { margin-top: var(--s2); }
+.profile-form .group__head h3 { font-size: var(--fs-footnote); font-weight: 400; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.02em; }
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  justify-items: center;
+  gap: 14px 8px;
+  padding: 16px 12px;
+  background: var(--sheet-card);
+}
+.avatar-pick {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px transparent;
+  transition: box-shadow 150ms ease, transform 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.avatar-pick:active { transform: scale(0.94); }
+.avatar-pick[aria-checked="true"] { box-shadow: 0 0 0 3px var(--sheet-card), 0 0 0 5px var(--accent); }
+.avatar-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.profile-form > * { flex: none; } /* the sheet scrolls; nothing gets squashed */
