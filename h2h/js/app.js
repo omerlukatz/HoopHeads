@@ -57,7 +57,8 @@ function relativeTime(iso) {
 
 const SCREENS = ['dashboard', 'history', 'friends', 'settings'];
 
-function show(screen) {
+/** `sub` is the friend profile open in the Friends tab: an id, null for the list, or undefined to keep it. */
+function show(screen, sub) {
   if (!SCREENS.includes(screen)) screen = 'dashboard';
   const same = ui.screen === screen;
   ui.screen = screen;
@@ -70,8 +71,10 @@ function show(screen) {
     if (el.dataset.nav === screen) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   }
-  if (location.hash.slice(1) !== screen) history.replaceState(null, '', `#${screen}`);
   document.title = `${{ dashboard: 'Dashboard', history: 'History', friends: 'Friends', settings: 'Settings' }[screen]} · H2H`;
+  if (screen === 'friends') showProfilePage(sub === undefined ? fp.userId : sub);
+  const target = screen === 'friends' && fp.userId ? `friends/${fp.userId}` : screen;
+  if (location.hash.slice(1) !== target) history.replaceState(history.state, '', `#${target}`);
   return same;
 }
 
@@ -79,6 +82,11 @@ document.addEventListener('click', (e) => {
   const nav = e.target.closest('[data-nav]');
   if (nav) {
     e.preventDefault();
+    // Tapping Friends while a profile is open goes back to the list, like iOS
+    if (nav.dataset.nav === 'friends' && ui.screen === 'friends' && fp.userId) {
+      haptic('light');
+      return closeProfile();
+    }
     const wasActive = show(nav.dataset.nav);
     haptic('light');
     // Tapping the active tab scrolls to top, like iOS
@@ -111,6 +119,12 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   openGameSheet();
 });
+
+/** #screen or #friends/<userId> */
+function route() {
+  const [screen, sub] = location.hash.slice(1).split('/');
+  show(screen || 'dashboard', screen === 'friends' ? sub || null : undefined);
+}
 
 // ---------- large title → inline title on scroll ----------
 
@@ -169,7 +183,7 @@ const wlPill = (win) =>
   `<span class="pill ${win ? 'pill--w' : 'pill--l'}" aria-label="${win ? 'Win' : 'Loss'}">${win ? 'W' : 'L'}</span>`;
 const otPill = '<span class="pill pill--ot" aria-label="Overtime">O</span>';
 /** W/L pill, plus an orange O when the game went to overtime. */
-const resultPills = (g) => `<span class="row__pills">${wlPill(g.win)}${g.overtime ? otPill : ''}</span>`;
+const resultPills = (g) => `<span class="row__pills">${g.overtime ? otPill : ''}${wlPill(g.win)}</span>`;
 
 function gameRow(g) {
   const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
@@ -915,7 +929,7 @@ function openGameSheet({ id = null } = {}) {
       <button type="submit" form="game-form" class="btn-text btn-text--strong" data-sheet="save" disabled>Save</button>
     </header>
     <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
-      <div class="h2hpop">
+      <div class="matchup">
         <div class="side">
           <span class="side__name">You</span>
           <div class="side__tile" data-slot="myTeam">${teamTile('myTeam', draft.myTeam)}</div>
@@ -1082,210 +1096,246 @@ function staticGameRow(g, opponents = null, { withMonth = false } = {}) {
   </div></div></li>`;
 }
 
-/** Profile sheet: overall stats, win-rate chart, best/worst team, opponents and full game history. */
+/**
+ * Friend profile page, shown inside the Friends tab (#friends/<id>). Everything is from that
+ * person's side. The chips at the top switch between their overall stats and each rivalry.
+ */
+const fp = { userId: null, sel: null, data: null, error: null, trend: { metric: 'winPct', range: 'All' }, listScroll: 0 };
+
 function openProfile(userId) {
-  if (document.documentElement.classList.contains('has-modal')) return;
-  const isMe = userId === meId();
-  const friend = isMe ? state.me : state.friends.find((f) => f.id === userId);
-  if (!friend) return;
-  const content = document.createElement('div');
-  content.className = 'sheet__content';
-  content.innerHTML = `
-    <header class="sheet__header">
-      <span></span>
-      <h2 id="profile-sheet-title" class="sheet__title">${isMe ? 'My Profile' : esc(friend.display_name)}</h2>
-      <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
-    </header>
-    <div class="sheet__body profile">
-      <div class="profile__head">
-        ${avatar(friend, 'xl')}
-        <h3 class="profile__name">${esc(friend.display_name)}</h3>
-        <p class="profile__user">@${esc(friend.username)}</p>
-      </div>
-      <div data-profile-body><p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p></div>
-    </div>`;
-  const body = $('[data-profile-body]', content);
-  const sheet = openSheet({ content, labelledBy: 'profile-sheet-title', large: true });
-  const trend = { metric: 'winPct', range: 'All' };
-  let data = null;
-
-  const paint = () => {
-    const { user, opponents: oppList, games } = data;
-    const opponents = new Map(oppList.map((u) => [u.id, u]));
-    const v = views(games, user.id);
-    const st = computeStats(games, user.id);
-    if (!st.total) {
-      body.innerHTML = `<p class="search-note">${isMe ? 'You haven’t' : `${esc(user.display_name)} hasn’t`} played any games yet.</p>`;
-      return;
-    }
-    const pct = Math.round(st.pct * 100);
-    const teams = teamRecords(v, 'myTeam');
-    const pool = teams.some((r) => r.games >= 2) ? teams.filter((r) => r.games >= 2) : teams;
-    const ranked = pool.slice().sort((a, b) => b.pct - a.pct || b.games - a.games);
-    const best = ranked[0], worst = ranked.length > 1 ? ranked.at(-1) : null;
-    const teamRow = (kind, r) =>
-      r
-        ? `<li class="teams__row"><span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>${logo(r.abbr, { size: 'md', alt: '' })}
-            <span class="teams__name"><span>${esc(getTeam(r.abbr)?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
-            <span class="teams__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></li>`
-        : '';
-    const opps = opponentRecords(v);
-    const vsMe = !isMe && opps.find((o) => o.id === meId());
-    const months = new Map();
-    for (const g of v) {
-      const k = g.date.slice(0, 7);
-      if (!months.has(k)) months.set(k, []);
-      months.get(k).push(g);
-    }
-
-    body.innerHTML = `
-      <section class="card hero profile__card" aria-label="Overall record">
-        <div class="hero__top">
-          <div class="ring" role="img" aria-label="Win rate ${pct} percent">
-            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring__track" cx="60" cy="60" r="52"/><circle class="ring__value" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C * (1 - pct / 100)}"/></svg>
-            <span class="ring__label" aria-hidden="true"><span class="ring__pct">${pct}<span class="ring__unit">%</span></span><span class="ring__caption">Win Rate</span></span>
-          </div>
-          <div class="hero__record">
-            <p class="eyebrow">Overall Record</p>
-            <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
-            <p class="hero__sub">${st.total} ${st.total === 1 ? 'game' : 'games'} · ${opps.length} ${opps.length === 1 ? 'opponent' : 'opponents'}</p>
-          </div>
-        </div>
-        <dl class="hero__streaks">
-          <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
-          <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
-          <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
-        </dl>
-      </section>
-
-      ${
-        vsMe
-          ? `<button type="button" class="card profile__vs" data-profile-rivalry>
-              <span class="cell__stack"><span class="tile__title">Against you</span><span class="profile__vs-record">${esc(user.display_name)} is ${vsMe.wins}–${vsMe.losses} vs you</span></span>
-              <span class="link">Open Rivalry</span></button>`
-          : ''
-      }
-
-      <section class="card tile profile__card">
-        <h3 class="tile__title">Scoring</h3>
-        <dl class="trio">
-          <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
-          <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
-          <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
-        </dl>
-      </section>
-
-      <section class="card trend profile__card" data-profile-trend aria-labelledby="profile-trend-title"></section>
-
-      <section class="card teams profile__card" aria-labelledby="profile-teams-title">
-        <h3 class="tile__title" id="profile-teams-title">Best &amp; Worst Teams</h3>
-        <ul class="teams__list" role="list">${teamRow('best', best)}${teamRow('worst', worst)}</ul>
-      </section>
-
-      <section class="group" aria-labelledby="profile-opps-title">
-        <div class="group__head"><h2 id="profile-opps-title">Played Against</h2><span class="group__record">${opps.length}</span></div>
-        <ul class="list list--friends list--sheet" role="list">
-          ${opps
-            .map((o) => {
-              const u = o.id === meId() ? state.me : opponents.get(o.id);
-              const cls = o.wins === o.losses ? '' : o.wins > o.losses ? 'is-win' : 'is-loss';
-              const inner = `${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${o.id === meId() ? 'You' : esc(u?.display_name || 'Unknown')}</span><span class="cell__sub">${u ? `@${esc(u.username)} · ` : ''}${o.games} ${o.games === 1 ? 'game' : 'games'}</span></span>
-                <span class="friend-row__record ${cls}" aria-label="${winsLosses(o.wins, o.losses)}">${o.wins}–${o.losses}</span>`;
-              return o.id === meId() && !isMe
-                ? `<li><button type="button" class="cell cell--button friend-row" data-profile-rivalry>${inner}</button></li>`
-                : `<li><button type="button" class="cell cell--plain friend-row" data-profile-h2h="${esc(o.id)}">${inner}</button></li>`;
-            })
-            .join('')}
-        </ul>
-        <p class="group__foot">Records are from ${isMe ? 'your' : `${esc(user.display_name)}’s`} side.</p>
-      </section>
-
-      ${[...months.values()]
-        .map((list, i) => {
-          const r = record(list);
-          return `<section class="group" aria-labelledby="pm-${i}">
-            <div class="group__head"><h2 id="pm-${i}">${monthLabel(list[0].date)}</h2><span class="group__record">${r.wins}–${r.losses}</span></div>
-            <ul class="list list--games list--sheet" role="list">${list.map((g) => staticGameRow(g, opponents)).join('')}</ul>
-          </section>`;
-        })
-        .join('')}`;
-
-    const drawTrend = () =>
-      renderTrendCard($('[data-profile-trend]', body), {
-        points: timeline(games, user.id),
-        metric: trend.metric,
-        range: trend.range,
-        opponent: 'vs everyone',
-        titleId: 'profile-trend-title',
-        onChange: (patch) => (Object.assign(trend, patch), drawTrend()),
-      });
-    drawTrend(); // the sheet is already laid out, so the card has its width
-  };
-
-  const load = async () => {
-    try {
-      data = await store.getProfile(userId);
-      paint();
-    } catch (err) {
-      data = store.cachedProfile(userId);
-      if (data) return paint();
-      body.innerHTML = `<div class="empty empty--compact"><p class="empty__text">${err.code === 'network' ? 'You’re offline. Profiles need a connection.' : esc(err.message)}</p>
-        <button type="button" class="btn btn--tinted" data-profile-retry>Try Again</button></div>`;
-    }
-  };
-  data = store.cachedProfile(userId);
-  if (data) paint();
-  load();
-
-  content.addEventListener('click', (e) => {
-    if (e.target.closest('[data-sheet="done"]')) return sheet.close();
-    if (e.target.closest('[data-profile-retry]')) {
-      body.innerHTML = '<p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p>';
-      return load();
-    }
-    const h2hBtn = e.target.closest('[data-profile-h2h]');
-    if (h2hBtn && data) return matchupPopup(data, h2hBtn.dataset.profileH2h);
-    if (e.target.closest('[data-profile-rivalry]')) {
-      e.stopPropagation();
-      store.setRival(userId);
-      sheet.close();
-      show('dashboard');
-    }
-  });
+  if (userId !== meId() && !state.friends.some((f) => f.id === userId)) return;
+  history.pushState({ profile: true }, '', `#friends/${userId}`);
+  show('friends', userId);
+  haptic('light');
 }
 
-/** One player's head-to-head against one opponent, from a profile's Played Against list. */
-function matchupPopup({ user, opponents, games }, oppId) {
+function closeProfile() {
+  if (history.state?.profile) history.back(); // hashchange brings back the list
+  else show('friends', null);
+}
+
+/** Shows the profile page for `userId`, or the friends list when it's null. */
+function showProfilePage(userId) {
+  const screen = $('.screen[data-screen="friends"]');
+  const scroller = $('.scroller', screen);
+  const page = $('#friend-page');
+  const isMe = userId === meId();
+  const friend = !userId ? null : isMe ? state.me : state.friends.find((f) => f.id === userId);
+  if (!friend) {
+    if (!fp.userId) return;
+    Object.assign(fp, { userId: null, data: null, error: null });
+    screen.classList.remove('is-subpage');
+    page.hidden = true;
+    page.innerHTML = '';
+    $('#friends-content').hidden = false;
+    $('#friends-navtitle').textContent = 'Friends';
+    scroller.scrollTop = fp.listScroll;
+    return;
+  }
+  document.title = `${isMe ? 'My Profile' : friend.display_name} · H2H`;
+  if (fp.userId === userId) return; // already showing it (e.g. back from another tab)
+  if (!fp.userId) fp.listScroll = scroller.scrollTop;
+  Object.assign(fp, { userId, sel: null, data: store.cachedProfile(userId), error: null, trend: { metric: 'winPct', range: 'All' } });
+  screen.classList.add('is-subpage');
+  $('#friends-content').hidden = true;
+  page.hidden = false;
+  $('#friends-navtitle').textContent = isMe ? 'My Profile' : friend.display_name;
+  scroller.scrollTop = 0;
+  paintProfile();
+  loadProfile();
+}
+
+async function loadProfile() {
+  const id = fp.userId;
+  try {
+    const data = await store.getProfile(id);
+    if (fp.userId !== id) return;
+    Object.assign(fp, { data, error: null });
+  } catch (err) {
+    if (fp.userId !== id || fp.data) return;
+    fp.error = err.code === 'network' ? 'You’re offline. Profiles need a connection.' : err.message;
+  }
+  paintProfile();
+}
+
+function paintProfile() {
+  const page = $('#friend-page');
+  const isMe = fp.userId === meId();
+  const friend = isMe ? state.me : state.friends.find((f) => f.id === fp.userId);
+  const head = `<div class="profile__head">${avatar(friend, 'xl')}<h2 class="profile__name">${esc(friend.display_name)}</h2><p class="profile__user">@${esc(friend.username)}</p></div>`;
+  if (!fp.data) {
+    page.innerHTML = `<div class="fpage">${head}${
+      fp.error
+        ? `<div class="empty empty--compact"><p class="empty__text">${esc(fp.error)}</p><button type="button" class="btn btn--tinted" data-fp-retry>Try Again</button></div>`
+        : '<p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p>'
+    }</div>`;
+    return;
+  }
+
+  const { user, opponents: oppList, games: allGames } = fp.data;
+  const opponents = new Map(oppList.map((u) => [u.id, u]));
+  const opps = opponentRecords(views(allGames, user.id));
+  if (fp.sel && !opps.some((o) => o.id === fp.sel)) fp.sel = null;
+  const sel = fp.sel;
+  const label = (id) => (id === meId() ? 'You' : opponents.get(id)?.display_name || 'Unknown');
   const involves = (g, id) => g.player1_id === id || g.player2_id === id;
-  const pair = games.filter((g) => involves(g, user.id) && involves(g, oppId));
-  const st = computeStats(pair, user.id);
-  const v = views(pair, user.id);
-  const isMe = user.id === meId();
+  const games = sel ? allGames.filter((g) => involves(g, user.id) && involves(g, sel)) : allGames;
+  const v = views(games, user.id);
+  const st = computeStats(games, user.id);
   const name = isMe ? 'You' : user.display_name;
-  const opp = oppId === meId() ? 'You' : opponents.find((u) => u.id === oppId)?.display_name || 'Unknown';
-  const pct = st.total ? Math.round(st.pct * 100) : 0;
-  openPopup({
-    title: `${name} vs ${opp}`,
-    subtitle: `${st.total} ${st.total === 1 ? 'game' : 'games'} · from ${isMe ? 'your' : `${name}’s`} side`,
-    body: st.total
-      ? `<div class="h2hpop">
-          <div class="h2hpop__top">
-            <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
-            <p class="h2hpop__pct"><span class="${pct >= 50 ? 'is-win' : 'is-loss'}">${pct}%</span> win rate</p>
-          </div>
-          <dl class="trio">
-            <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
-            <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
-            <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
-          </dl>
-          <dl class="trio">
-            <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
-            <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
-            <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
-          </dl>
+
+  const chipsScroll = $('.rchips', page)?.scrollLeft || 0;
+  const chips = opps.length
+    ? `<div class="rchips" role="toolbar" aria-label="Rivalries">
+        <button type="button" class="rchip" data-fp-sel="" aria-pressed="${!sel}">Everyone</button>
+        ${opps.map((o) => `<button type="button" class="rchip" data-fp-sel="${esc(o.id)}" aria-pressed="${sel === o.id}">${isMe ? 'vs ' : ''}${esc(label(o.id))}</button>`).join('')}
+      </div>`
+    : '';
+
+  if (!st.total) {
+    page.innerHTML = `<div class="fpage">${head}<p class="search-note">${isMe ? 'You haven’t' : `${esc(user.display_name)} hasn’t`} played any games yet.</p></div>`;
+    return;
+  }
+
+  const pct = Math.round(st.pct * 100);
+  const teams = teamRecords(v, 'myTeam');
+  const pool = teams.some((r) => r.games >= 2) ? teams.filter((r) => r.games >= 2) : teams;
+  const ranked = pool.slice().sort((a, b) => b.pct - a.pct || b.games - a.games);
+  const best = ranked[0], worst = ranked.length > 1 ? ranked.at(-1) : null;
+  const teamRow = (kind, r) =>
+    r
+      ? `<li class="teams__row"><span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>${logo(r.abbr, { size: 'md', alt: '' })}
+          <span class="teams__name"><span>${esc(getTeam(r.abbr)?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
+          <span class="teams__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></li>`
+      : '';
+  const vsMe = !isMe && (!sel || sel === meId()) && opps.find((o) => o.id === meId());
+  const months = new Map();
+  for (const g of v) {
+    const k = g.date.slice(0, 7);
+    if (!months.has(k)) months.set(k, []);
+    months.get(k).push(g);
+  }
+  const vsText = sel ? `vs ${label(sel)}` : 'vs everyone';
+
+  page.innerHTML = `<div class="fpage">
+    ${head}
+    ${chips}
+    <section class="card hero" aria-label="${sel ? `Record ${esc(vsText)}` : 'Overall record'}">
+      <div class="hero__top">
+        <div class="ring" role="img" aria-label="Win rate ${pct} percent">
+          <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring__track" cx="60" cy="60" r="52"/><circle class="ring__value" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C * (1 - pct / 100)}"/></svg>
+          <span class="ring__label" aria-hidden="true"><span class="ring__pct">${pct}<span class="ring__unit">%</span></span><span class="ring__caption">Win Rate</span></span>
         </div>
-        <ul class="list list--games" role="list">${v.map((g) => staticGameRow(g, null, { withMonth: true })).join('')}</ul>`
-      : '<p class="popup__empty">No games yet.</p>',
+        <div class="hero__record">
+          <p class="eyebrow">${sel ? `Record ${esc(vsText)}` : 'Overall Record'}</p>
+          <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
+          <p class="hero__sub">${st.total} ${st.total === 1 ? 'game' : 'games'}${sel ? ` · ${isMe ? 'your' : `${esc(name)}’s`} side` : ` · ${opps.length} ${opps.length === 1 ? 'opponent' : 'opponents'}`}</p>
+        </div>
+      </div>
+      <dl class="hero__streaks">
+        <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
+        <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
+        <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
+      </dl>
+    </section>
+
+    ${
+      vsMe
+        ? `<button type="button" class="card profile__vs" data-profile-rivalry>
+            <span class="cell__stack"><span class="tile__title">Against you</span><span class="profile__vs-record">${esc(user.display_name)} is ${vsMe.wins}–${vsMe.losses} vs you</span></span>
+            <span class="link">Open Rivalry</span></button>`
+        : ''
+    }
+
+    <section class="card tile">
+      <h3 class="tile__title">Scoring</h3>
+      <dl class="trio">
+        <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
+        <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
+        <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
+      </dl>
+    </section>
+
+    <section class="card trend" data-profile-trend aria-labelledby="profile-trend-title"></section>
+
+    <section class="card teams" aria-labelledby="profile-teams-title">
+      <h3 class="tile__title" id="profile-teams-title">Best &amp; Worst Teams</h3>
+      <ul class="teams__list" role="list">${teamRow('best', best)}${teamRow('worst', worst)}</ul>
+    </section>
+
+    ${
+      sel
+        ? ''
+        : `<section class="group" aria-labelledby="profile-opps-title">
+      <div class="group__head"><h2 id="profile-opps-title">Played Against</h2><span class="group__record">${opps.length}</span></div>
+      <ul class="list list--friends" role="list">
+        ${opps
+          .map((o) => {
+            const u = o.id === meId() ? state.me : opponents.get(o.id);
+            const cls = o.wins === o.losses ? '' : o.wins > o.losses ? 'is-win' : 'is-loss';
+            return `<li><button type="button" class="cell cell--plain friend-row" data-fp-sel="${esc(o.id)}" aria-label="${esc(label(o.id))}: ${winsLosses(o.wins, o.losses)}. Show this rivalry">${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${esc(label(o.id))}</span><span class="cell__sub">${u ? `@${esc(u.username)} · ` : ''}${o.games} ${o.games === 1 ? 'game' : 'games'}</span></span>
+              <span class="friend-row__record ${cls}">${o.wins}–${o.losses}</span></button></li>`;
+          })
+          .join('')}
+      </ul>
+      <p class="group__foot">Records are from ${isMe ? 'your' : `${esc(user.display_name)}’s`} side.</p>
+    </section>`
+    }
+
+    ${[...months.values()]
+      .map((list, i) => {
+        const r = record(list);
+        return `<section class="group" aria-labelledby="pm-${i}">
+          <div class="group__head"><h2 id="pm-${i}">${monthLabel(list[0].date)}</h2><span class="group__record">${r.wins}–${r.losses}</span></div>
+          <ul class="list list--games" role="list">${list.map((g) => staticGameRow(g, sel ? null : opponents)).join('')}</ul>
+        </section>`;
+      })
+      .join('')}
+  </div>`;
+
+  const chipRow = $('.rchips', page);
+  if (chipRow) chipRow.scrollLeft = chipsScroll;
+  const drawTrend = () =>
+    renderTrendCard($('[data-profile-trend]', page), {
+      points: timeline(games, user.id),
+      metric: fp.trend.metric,
+      range: fp.trend.range,
+      opponent: vsText,
+      titleId: 'profile-trend-title',
+      onChange: (patch) => (Object.assign(fp.trend, patch), drawTrend()),
+    });
+  drawTrend();
+}
+
+function initProfilePage() {
+  $('#friend-back').addEventListener('click', () => {
+    haptic('light');
+    closeProfile();
+  });
+  $('#friend-page').addEventListener('click', (e) => {
+    const selBtn = e.target.closest('[data-fp-sel]');
+    if (selBtn) {
+      const id = selBtn.dataset.fpSel || null;
+      if (id === fp.sel) return;
+      haptic('light');
+      fp.sel = id;
+      paintProfile();
+      const chip = $(`.rchip[data-fp-sel="${id || ''}"]`, e.currentTarget);
+      chip?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // Picked from the Played Against list: go back up to the stats
+      if (!selBtn.classList.contains('rchip')) $('.screen[data-screen="friends"] .scroller').scrollTo({ top: 0, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+      return;
+    }
+    if (e.target.closest('[data-fp-retry]')) {
+      fp.error = null;
+      paintProfile();
+      loadProfile();
+      return;
+    }
+    if (e.target.closest('[data-profile-rivalry]')) {
+      store.setRival(fp.userId);
+      show('dashboard');
+    }
   });
 }
 
@@ -1724,6 +1774,7 @@ function onStoreChange(detail) {
     ui.signature = '';
     if (!state.session) {
       closeModals();
+      showProfilePage(null);
       ui.resetSearch?.();
       lockAndStart(detail.expired ? 'Your session ended. Sign in again.' : '');
     }
@@ -1779,9 +1830,10 @@ async function init() {
   initSwipe();
   initSettings();
   initFriends();
-  show(location.hash.slice(1) || 'dashboard');
+  initProfilePage();
+  route();
   store.subscribe(onStoreChange);
-  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  window.addEventListener('hashchange', route);
   setInterval(() => ui.screen === 'settings' && state.session && !$('#settings-content').contains(document.activeElement) && renderSettings(), 30000); // keeps "Updated x min ago" fresh
 
   if (!state.session) {

@@ -663,7 +663,8 @@ img { display: block; max-width: 100%; }
 .pill--w { background: var(--win-tint); color: var(--win-text); }
 .pill--l { background: var(--loss-tint); color: var(--loss-text); }
 .pill--ot { background: var(--ot-tint); color: var(--ot-text); }
-.row__pills { display: inline-flex; gap: 4px; justify-self: end; }
+/* Fixed width, W/L last: every W and L lines up at the right edge, with the O to its left */
+.row__pills { display: inline-flex; justify-content: flex-end; gap: 4px; width: 56px; justify-self: end; }
 
 .is-win { color: var(--win-text); }
 .is-loss { color: var(--loss-text); }
@@ -1838,17 +1839,10 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
   }
 }
 
-/* Played Against rows that open a head-to-head pop-up: tappable, but they look like the plain row */
+/* Played Against rows that switch the profile to that rivalry: tappable, but they look like the plain row */
 .cell--plain { text-align: left; -webkit-tap-highlight-color: transparent; }
 .cell--plain:focus-visible { box-shadow: inset var(--focus); }
 
-.h2hpop { padding-bottom: var(--s2); }
-.h2hpop__top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
-.h2hpop .record { font-size: 40px; }
-.h2hpop__pct { font-size: var(--fs-subhead); color: var(--label-2); text-align: right; }
-.h2hpop__pct span { font-weight: 700; font-size: var(--fs-headline, 17px); }
-.h2hpop .trio { margin-top: 14px; }
-.h2hpop .trio dd { font-size: 22px; }
 
 /* ============ Theme swatches ============ */
 
@@ -1876,3 +1870,57 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .swatch__check { width: 20px; height: 20px; color: #fff; stroke-width: 2.5; opacity: 0; }
 .swatch[aria-checked="true"] .swatch__check { opacity: 1; }
 .swatch:focus-visible { outline: 2px solid var(--label); outline-offset: 4px; }
+
+/* ============ Friend profile page (inside the Friends tab) ============ */
+
+.navbar__back {
+  position: absolute;
+  top: var(--safe-top);
+  left: calc(var(--safe-left) + 6px);
+  height: var(--navbar-h);
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding-right: 8px;
+  color: var(--accent-text);
+  font-size: var(--fs-body);
+  -webkit-tap-highlight-color: transparent;
+}
+.navbar__back .icon { width: 26px; height: 26px; stroke-width: 2.25; }
+.navbar__back:active { opacity: 0.4; }
+.screen.is-subpage .navbar__back { display: flex; }
+.screen.is-subpage .large-title { display: none; }
+.screen.is-subpage .navbar { box-shadow: 0 var(--hairline) 0 var(--separator); }
+.screen.is-subpage .navbar::before { opacity: 1; }
+.screen.is-subpage .navbar__title { opacity: 1; transform: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fpage { display: flex; flex-direction: column; gap: 12px; padding-top: var(--s1); }
+.fpage .group { margin-bottom: 0; }
+.fpage .profile__head { padding-bottom: 0; }
+
+/* Rivalry toggle: Everyone · each opponent */
+.rchips {
+  display: flex;
+  gap: 8px;
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 4px var(--gutter);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.rchips::-webkit-scrollbar { display: none; }
+.rchip {
+  flex: none;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--r-pill);
+  background: var(--card);
+  box-shadow: var(--card-border), var(--shadow-card);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 150ms ease, color 150ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.rchip[aria-pressed="true"] { background: var(--accent-fill); color: #fff; }
+.rchip:focus-visible { box-shadow: var(--focus); }

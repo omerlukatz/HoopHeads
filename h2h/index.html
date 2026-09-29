@@ -96,7 +96,10 @@
       </section>
 
       <section class="screen" data-screen="friends" aria-labelledby="t-friends" inert>
-        <header class="navbar"><span class="navbar__title" aria-hidden="true">Friends</span><span class="navbar__trailing" data-sync></span></header>
+        <header class="navbar">
+          <button type="button" class="navbar__back" id="friend-back"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.75-6.25 6.25 6.25 6.25"/></svg>Friends</button>
+          <span class="navbar__title" aria-hidden="true" id="friends-navtitle">Friends</span><span class="navbar__trailing" data-sync></span>
+        </header>
         <div class="scroller">
           <h1 class="large-title" id="t-friends">Friends</h1>
           <div class="content" id="friends-content">
@@ -108,6 +111,7 @@
             <div id="friend-results" aria-live="polite"></div>
             <div id="friends-list"></div>
           </div>
+          <div class="content is-ready" id="friend-page" hidden></div>
         </div>
       </section>
 
