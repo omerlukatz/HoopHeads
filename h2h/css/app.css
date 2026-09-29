@@ -673,15 +673,23 @@ img { display: block; max-width: 100%; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     "hero hero"
+    "trend trend"
     "rematch rematch"
     "streak longest"
     "scoring scoring"
     "blowout closest"
+    "clutch clutch"
+    "teams teams"
+    "activity activity"
     "recent recent";
   gap: 12px;
 }
 .area-hero { grid-area: hero; }
 .area-rematch { grid-area: rematch; }
+.area-trend { grid-area: trend; }
+.area-clutch { grid-area: clutch; }
+.area-teams { grid-area: teams; }
+.area-activity { grid-area: activity; }
 .area-streak { grid-area: streak; }
 .area-longest { grid-area: longest; }
 .area-scoring { grid-area: scoring; }
@@ -695,7 +703,10 @@ img { display: block; max-width: 100%; }
     grid-template-areas:
       "hero hero streak longest"
       "hero hero blowout closest"
-      "scoring scoring rematch rematch"
+      "trend trend trend trend"
+      "scoring scoring clutch clutch"
+      "teams teams activity activity"
+      "teams teams rematch rematch"
       "recent recent recent recent";
     gap: var(--s2);
   }
@@ -1451,6 +1462,137 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
   .keypad { grid-template-columns: repeat(3, 68px); gap: 12px 24px; }
   .key { width: 68px; height: 68px; }
   .pin__head .avatar { --size: 48px; }
+}
+
+/* ============ Over-time chart ============ */
+
+.trend { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px var(--s2) var(--s2); }
+.trend__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trend__top .tile__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trend__top .seg { width: auto; flex: none; }
+.trend__top .seg__item { padding: 0 10px; }
+.trend__hero { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.trend__value { font-size: 34px; line-height: 1.05; font-weight: 700; letter-spacing: -0.02em; }
+.trend__delta { font-size: var(--fs-subhead); font-weight: 600; color: var(--label-2); }
+.trend__delta.is-win { color: var(--win-text); }
+.trend__delta.is-loss { color: var(--loss-text); }
+.trend__phrase { font-size: var(--fs-subhead); color: var(--label-2); }
+.trend__sub { margin-top: -6px; font-size: var(--fs-footnote); color: var(--label-2); }
+.trend__plot { position: relative; min-height: 176px; margin: 0 -4px; }
+.trend__empty { display: grid; place-items: center; min-height: 176px; color: var(--label-2); font-size: var(--fs-subhead); }
+.trend__svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; cursor: crosshair; border-radius: var(--r-small); }
+.trend__svg:focus-visible { box-shadow: var(--focus); }
+.trend__grid line { stroke: var(--separator); stroke-width: 1; shape-rendering: crispEdges; }
+.trend__ylabel, .trend__xlabel { fill: var(--label-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.trend__ylabel { text-anchor: end; }
+.trend__even { stroke: var(--label-3); stroke-width: 1; stroke-dasharray: 0; }
+.trend__area { fill: var(--accent); opacity: 0.1; }
+.trend__line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend__end { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.trend__cursor line { stroke: var(--label-3); stroke-width: 1; }
+.trend__cursor circle { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.trend__tip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: var(--r-small);
+  background: var(--material-thick);
+  -webkit-backdrop-filter: var(--material-filter);
+  backdrop-filter: var(--material-filter);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.trend__tip strong { font-size: var(--fs-headline); font-variant-numeric: tabular-nums; }
+.trend__tip span { font-size: var(--fs-caption); color: var(--label-2); }
+
+/* Segmented control (iOS): radio buttons with a sliding thumb */
+.seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--count), minmax(0, 1fr));
+  height: 32px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill);
+}
+.seg__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--count));
+  border-radius: 7px;
+  background: var(--thumb);
+  box-shadow: var(--shadow-thumb), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transform: translateX(calc(var(--index) * 100%));
+  transition: transform var(--t-med) var(--spring);
+}
+@media (prefers-color-scheme: dark) { .seg__thumb { background: #636366; } }
+.seg__item {
+  position: relative;
+  min-width: 0;
+  padding: 0 4px;
+  border-radius: 7px;
+  font-size: var(--fs-footnote);
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+}
+.seg__item[aria-checked="true"] { font-weight: 600; }
+.seg__item:active { opacity: 0.6; }
+.seg__item:focus-visible { box-shadow: var(--focus); }
+.seg__item::after { content: ""; position: absolute; inset: -6px 0; }
+
+/* ============ Clutch, teams, activity ============ */
+
+.trio__hint { margin-top: 0 !important; font-size: var(--fs-caption) !important; font-weight: 500 !important; color: var(--label-2); letter-spacing: 0 !important; }
+.area-clutch .trio dd:not(.trio__hint) { font-size: 24px; }
+
+.teams, .activity { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px var(--s2) var(--s2); }
+.teams__top, .activity__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.teams__top .seg { flex: none; width: auto; max-width: 62%; }
+.teams__top .seg__item { padding: 0 10px; overflow: hidden; text-overflow: ellipsis; }
+.activity__sub { margin-top: -4px; font-size: var(--fs-footnote); color: var(--label-2); }
+.teams__list { display: flex; flex-direction: column; }
+.teams__row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 64px 48px; align-items: center; gap: 12px; min-height: 52px; }
+.teams__row + .teams__row { border-top: var(--hairline) solid var(--separator); }
+.teams__name { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-subhead); font-weight: 600; }
+.teams__name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teams__meta { font-size: var(--fs-caption); font-weight: 400; color: var(--label-2); }
+.teams__bar { height: 6px; border-radius: 3px; background: var(--fill-strong); overflow: hidden; }
+.teams__bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.teams__record { text-align: right; font-size: var(--fs-headline); font-weight: 700; }
+.teams__more { align-self: flex-start; min-height: 36px; font-size: var(--fs-subhead); }
+
+.activity__legend { display: flex; gap: 10px; font-size: var(--fs-caption); color: var(--label-2); white-space: nowrap; }
+.activity__legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.cal-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.cal-key--win { background: var(--day-win); }
+.cal-key--loss { background: var(--day-loss); }
+.cal-key--split { background: var(--day-split); }
+.activity__plot { overflow: hidden; }
+.cal__svg { display: block; max-width: 100%; height: auto; touch-action: manipulation; border-radius: 4px; }
+.cal__svg:focus-visible { box-shadow: var(--focus); }
+.cal__label { fill: var(--label-2); font-size: 10px; }
+.cal__day { cursor: pointer; }
+.cal__day--none { fill: var(--fill); }
+.cal__day--win { fill: var(--day-win); }
+.cal__day--loss { fill: var(--day-loss); }
+.cal__day--split { fill: var(--day-split); }
+.cal__day--l1 { fill-opacity: 0.45; }
+.cal__day--l2 { fill-opacity: 0.72; }
+.cal__day--l3 { fill-opacity: 1; }
+.cal__day--none.cal__day--l0 { fill-opacity: 1; }
+.cal__focus { fill: none; stroke: var(--label); stroke-width: 1.5; pointer-events: none; }
+.cal__readout { min-height: 20px; font-size: var(--fs-footnote); color: var(--label-2); font-variant-numeric: tabular-nums; }
+/* High-contrast / forced colours: add a texture to lost days so result never relies on hue alone */
+@media (prefers-contrast: more), (forced-colors: active) {
+  .cal__day--loss { stroke: var(--label); stroke-width: 1; stroke-dasharray: 2 2; }
 }
 
 /* ============ Rivalries & friends ============ */

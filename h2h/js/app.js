@@ -2,7 +2,8 @@ import { TEAMS, getTeam, searchTeams } from './teams.js';
 import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
-import { views, computeStats, record, recentTeams } from './stats.js';
+import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
+import { renderTrendCard, renderActivity, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, changePinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
@@ -16,7 +17,19 @@ const ui = {
   views: [],
   stats: { total: 0 },
   justSaved: false,
+  trend: loadTrendPrefs(),
+  teamsSide: 'myTeam',
+  teamsAll: false,
 };
+
+function loadTrendPrefs() {
+  try {
+    const t = JSON.parse(localStorage.getItem('h2h.trend') || '{}');
+    return { metric: METRICS[t.metric] ? t.metric : 'rating', range: RANGES.some((r) => r.id === t.range) ? t.range : 'All' };
+  } catch {
+    return { metric: 'rating', range: 'All' };
+  }
+}
 
 const meId = () => state.session?.userId;
 const meName = () => state.me?.display_name || '';
@@ -294,6 +307,8 @@ function renderDashboard() {
       </div>
     </section>
 
+    <section class="card trend area-trend" id="trend-card" aria-labelledby="trend-title"></section>
+
     <button type="button" class="card rematch area-rematch" data-action="rematch">
       <span class="rematch__logos">${logo(last.myTeam, { size: 'md', alt: '' })}${logo(last.oppTeam, { size: 'md', alt: '' })}</span>
       <span class="rematch__text"><span class="rematch__title">Rematch</span><span class="rematch__sub">${getTeam(last.myTeam)?.nickname} vs ${getTeam(last.oppTeam)?.nickname}</span></span>
@@ -324,6 +339,21 @@ function renderDashboard() {
     ${gameTile('blowout', 'Biggest Win', s.biggestWin, 'No wins yet.')}
     ${gameTile('closest', 'Closest Game', s.closest)}
 
+    ${clutchTile()}
+
+    <section class="card teams area-teams" id="teams-card" aria-labelledby="teams-title"></section>
+
+    <section class="card activity area-activity" aria-labelledby="activity-title">
+      <div class="activity__top">
+        <h3 class="tile__title" id="activity-title">Activity</h3>
+        <span class="activity__legend" aria-hidden="true">
+          <span><i class="cal-key cal-key--win"></i>Won</span><span><i class="cal-key cal-key--loss"></i>Lost</span><span><i class="cal-key cal-key--split"></i>Split</span>
+        </span>
+      </div>
+      <p class="activity__sub">Each square is a day. Darker means more games.</p>
+      <div class="activity__plot" id="activity-plot"></div>
+    </section>
+
     <section class="area-recent" aria-labelledby="recent-title">
       <div class="section-head">
         <h2 id="recent-title" class="section-title">Recent Games</h2>
@@ -334,9 +364,113 @@ function renderDashboard() {
   </div>`;
 
   animateNumbers(el);
+  renderTrend();
+  renderTeams();
+  renderActivity($('#activity-plot'), activityByDay(ui.views));
   const ring = $('.ring__value', el);
   requestAnimationFrame(() => requestAnimationFrame(() => ring.setAttribute('stroke-dashoffset', ring.dataset.offset)));
 }
+
+// ---------- clutch, teams ----------
+
+function clutchTile() {
+  const c = clutch(ui.views);
+  const cell = (label, r, hint) => {
+    const n = r.wins + r.losses;
+    const cls = !n || r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss';
+    return `<div><dt>${label}</dt><dd class="${cls}" aria-label="${n ? winsLosses(r.wins, r.losses) : 'No games'}">${n ? `${r.wins}–${r.losses}` : '—'}</dd><dd class="trio__hint">${n ? `${Math.round((r.wins / n) * 100)}%` : hint}</dd></div>`;
+  };
+  return `<section class="card tile area-clutch" aria-labelledby="clutch-title">
+    <h3 class="tile__title" id="clutch-title">Clutch</h3>
+    <dl class="trio">
+      ${cell(`Close (≤${CLOSE_MARGIN})`, c.close, 'None yet')}
+      ${cell('Overtime', c.overtime, 'None yet')}
+      ${cell(`Blowouts (${BLOWOUT_MARGIN}+)`, c.blowouts, 'None yet')}
+    </dl>
+  </section>`;
+}
+
+const TEAMS_SHOWN = 5;
+function renderTeams() {
+  const card = $('#teams-card');
+  if (!card) return;
+  const side = ui.teamsSide;
+  const rows = teamRecords(ui.views, side);
+  const shown = ui.teamsAll ? rows : rows.slice(0, TEAMS_SHOWN);
+  const opts = [
+    { value: 'myTeam', label: 'Your Teams' },
+    { value: 'oppTeam', label: `${oppName()}’s` },
+  ];
+  const index = opts.findIndex((o) => o.value === side);
+  card.innerHTML = `
+    <div class="teams__top">
+      <h3 class="tile__title" id="teams-title">Team Matchups</h3>
+      <div class="seg" role="radiogroup" aria-label="Whose teams" style="--count:2;--index:${index}">
+        <span class="seg__thumb" aria-hidden="true"></span>
+        ${opts.map((o, i) => `<button type="button" class="seg__item" role="radio" aria-checked="${i === index}" tabindex="${i === index ? 0 : -1}" data-teams="${o.value}">${esc(o.label)}</button>`).join('')}
+      </div>
+    </div>
+    <p class="activity__sub">${side === 'myTeam' ? 'Your record with each team you’ve played as.' : `Your record against each team ${esc(oppName())} has played as.`}</p>
+    <ul class="teams__list" role="list">
+      ${shown
+        .map((r) => {
+          const t = getTeam(r.abbr);
+          const cls = r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss';
+          return `<li class="teams__row">
+            ${logo(r.abbr, { size: 'sm', alt: '' })}
+            <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}%</span></span>
+            <span class="teams__bar" aria-hidden="true"><span style="width:${Math.round(r.pct * 100)}%"></span></span>
+            <span class="teams__record ${cls}" aria-label="${esc(t?.name || r.abbr)}: ${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span>
+          </li>`;
+        })
+        .join('')}
+    </ul>
+    ${rows.length > TEAMS_SHOWN ? `<button type="button" class="link teams__more" data-teams-more>${ui.teamsAll ? 'Show fewer' : `Show all ${rows.length} teams`}</button>` : ''}`;
+  card.querySelectorAll('[data-teams]').forEach((b) =>
+    b.addEventListener('click', () => {
+      if (ui.teamsSide === b.dataset.teams) return;
+      haptic('light');
+      ui.teamsSide = b.dataset.teams;
+      renderTeams();
+    }),
+  );
+  card.querySelector('[data-teams-more]')?.addEventListener('click', () => {
+    ui.teamsAll = !ui.teamsAll;
+    renderTeams();
+  });
+}
+
+// ---------- over-time chart ----------
+
+function renderTrend() {
+  const card = $('#trend-card');
+  if (!card || !store.rival()) return;
+  renderTrendCard(card, {
+    points: timeline(store.pairGames(), meId()),
+    metric: ui.trend.metric,
+    range: ui.trend.range,
+    opponent: oppName(),
+    onChange: (patch) => {
+      Object.assign(ui.trend, patch);
+      try {
+        localStorage.setItem('h2h.trend', JSON.stringify(ui.trend));
+      } catch { /* private mode */ }
+      renderTrend();
+    },
+  });
+}
+
+// Redraw the chart when its width changes (rotation, window resize, sidebar breakpoint)
+let trendWidth = 0;
+new ResizeObserver(() => {
+  const w = $('#trend-card')?.clientWidth || 0;
+  if (w && Math.abs(w - trendWidth) > 2) {
+    trendWidth = w;
+    renderTrend();
+    const plot = $('#activity-plot');
+    if (plot) renderActivity(plot, activityByDay(ui.views));
+  }
+}).observe(document.getElementById('dashboard-content'));
 
 // ---------- history ----------
 
