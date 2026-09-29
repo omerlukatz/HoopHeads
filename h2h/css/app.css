@@ -673,10 +673,8 @@ img { display: block; max-width: 100%; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     "hero hero"
-    "trend trend"
-    "rematch rematch"
-    "streak longest"
     "scoring scoring"
+    "trend trend"
     "blowout closest"
     "clutch clutch"
     "teams teams"
@@ -685,13 +683,10 @@ img { display: block; max-width: 100%; }
   gap: 12px;
 }
 .area-hero { grid-area: hero; }
-.area-rematch { grid-area: rematch; }
 .area-trend { grid-area: trend; }
 .area-clutch { grid-area: clutch; }
 .area-teams { grid-area: teams; }
 .area-activity { grid-area: activity; }
-.area-streak { grid-area: streak; }
-.area-longest { grid-area: longest; }
 .area-scoring { grid-area: scoring; }
 .area-blowout { grid-area: blowout; }
 .area-closest { grid-area: closest; }
@@ -701,12 +696,11 @@ img { display: block; max-width: 100%; }
   .dash-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas:
-      "hero hero streak longest"
+      "hero hero scoring scoring"
       "hero hero blowout closest"
       "trend trend trend trend"
-      "scoring scoring clutch clutch"
+      "clutch clutch activity activity"
       "teams teams activity activity"
-      "teams teams rematch rematch"
       "recent recent recent recent";
     gap: var(--s2);
   }
@@ -762,16 +756,17 @@ img { display: block; max-width: 100%; }
 .ring__unit { font-size: 15px; font-weight: 600; margin-left: 1px; color: var(--label-2); }
 .ring__caption { margin-top: 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--label-2); }
 
-.hero__last5 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.hero__label { font-size: var(--fs-subhead); color: var(--label-2); }
+.hero__streaks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding-top: 14px;
   border-top: var(--hairline) solid var(--separator);
 }
-.hero__label { font-size: var(--fs-subhead); color: var(--label-2); }
-.pills { display: flex; gap: 6px; }
-.pills .pill { min-width: 30px; height: 26px; font-size: var(--fs-footnote); }
+.hero__streaks > div + div { padding-left: 12px; border-left: var(--hairline) solid var(--separator); }
+.hero__streaks > div:not(:last-child) { padding-right: 12px; }
+.hero__streaks dt { font-size: var(--fs-caption); color: var(--label-2); white-space: nowrap; }
+.hero__streaks dd { margin-top: 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
 
 @media (min-width: 1100px) {
   .hero { padding: var(--s3); }
@@ -779,34 +774,6 @@ img { display: block; max-width: 100%; }
   .ring__pct { font-size: 36px; }
   .record { font-size: 64px; }
 }
-
-.rematch {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 72px;
-  padding: 12px var(--s2);
-  text-align: left;
-  transition: transform 120ms ease, background-color 150ms ease;
-}
-.rematch:active { transform: scale(0.98); }
-@media (hover: hover) { .rematch:hover { background-color: color-mix(in srgb, var(--card), var(--label) 3%); } }
-.rematch__logos { display: flex; }
-.rematch__logos .logo + .logo { margin-left: -10px; box-shadow: 0 0 0 2px var(--card), inset 0 0 0 var(--hairline) var(--tile-edge); }
-.rematch__text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.rematch__title { font-size: var(--fs-headline); font-weight: 600; }
-.rematch__sub { overflow: hidden; font-size: var(--fs-subhead); color: var(--label-2); white-space: nowrap; text-overflow: ellipsis; }
-.rematch__icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--accent-tint);
-  color: var(--accent-text);
-}
-.rematch__icon .icon { width: 20px; height: 20px; stroke-width: 1.75; }
 
 .tile {
   display: flex;
@@ -982,6 +949,27 @@ img { display: block; max-width: 100%; }
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.side__name--switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 32px;
+  margin: -6px auto;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  max-width: 100%;
+  transition: transform 100ms ease, opacity 150ms ease;
+  position: relative;
+}
+.side__name--switch::after { content: ""; position: absolute; inset: -6px 0; }
+.side__name--switch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side__name--switch .icon { flex: none; width: 16px; height: 16px; stroke-width: 2.25; }
+.side__name--switch:active { transform: scale(0.96); opacity: 0.7; }
+.side__name--switch:focus-visible { box-shadow: var(--focus); border-radius: var(--r-pill); }
+.friend-row__check:empty { width: 22px; }
 .matchup__vs {
   align-self: center;
   margin-top: -58px;
@@ -1559,15 +1547,15 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .teams__top .seg__item { padding: 0 10px; overflow: hidden; text-overflow: ellipsis; }
 .activity__sub { margin-top: -4px; font-size: var(--fs-footnote); color: var(--label-2); }
 .teams__list { display: flex; flex-direction: column; }
-.teams__row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 64px 48px; align-items: center; gap: 12px; min-height: 52px; }
+.teams__row { display: grid; grid-template-columns: 52px 48px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; }
 .teams__row + .teams__row { border-top: var(--hairline) solid var(--separator); }
-.teams__name { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-subhead); font-weight: 600; }
+.teams__kind { justify-self: start; padding: 3px 8px; border-radius: var(--r-pill); font-size: var(--fs-caption); font-weight: 700; }
+.teams__kind--best { background: var(--win-tint); color: var(--win-text); }
+.teams__kind--worst { background: var(--loss-tint); color: var(--loss-text); }
+.teams__name { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-headline); font-weight: 600; }
 .teams__name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.teams__meta { font-size: var(--fs-caption); font-weight: 400; color: var(--label-2); }
-.teams__bar { height: 6px; border-radius: 3px; background: var(--fill-strong); overflow: hidden; }
-.teams__bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-.teams__record { text-align: right; font-size: var(--fs-headline); font-weight: 700; }
-.teams__more { align-self: flex-start; min-height: 36px; font-size: var(--fs-subhead); }
+.teams__meta { font-size: var(--fs-footnote); font-weight: 400; color: var(--label-2); }
+.teams__record { text-align: right; font-size: var(--fs-title); font-weight: 700; letter-spacing: -0.01em; }
 
 .activity__legend { display: flex; gap: 10px; font-size: var(--fs-caption); color: var(--label-2); white-space: nowrap; }
 .activity__legend > span { display: inline-flex; align-items: center; gap: 4px; }
@@ -1575,24 +1563,53 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .cal-key--win { background: var(--day-win); }
 .cal-key--loss { background: var(--day-loss); }
 .cal-key--split { background: var(--day-split); }
-.activity__plot { overflow: hidden; }
-.cal__svg { display: block; max-width: 100%; height: auto; touch-action: manipulation; border-radius: 4px; }
-.cal__svg:focus-visible { box-shadow: var(--focus); }
-.cal__label { fill: var(--label-2); font-size: 10px; }
-.cal__day { cursor: pointer; }
-.cal__day--none { fill: var(--fill); }
-.cal__day--win { fill: var(--day-win); }
-.cal__day--loss { fill: var(--day-loss); }
-.cal__day--split { fill: var(--day-split); }
-.cal__day--l1 { fill-opacity: 0.45; }
-.cal__day--l2 { fill-opacity: 0.72; }
-.cal__day--l3 { fill-opacity: 1; }
-.cal__day--none.cal__day--l0 { fill-opacity: 1; }
-.cal__focus { fill: none; stroke: var(--label); stroke-width: 1.5; pointer-events: none; }
-.cal__readout { min-height: 20px; font-size: var(--fs-footnote); color: var(--label-2); font-variant-numeric: tabular-nums; }
-/* High-contrast / forced colours: add a texture to lost days so result never relies on hue alone */
+.cal__nav { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; margin-top: 2px; }
+.cal__arrow { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: var(--accent); transition: background-color 150ms ease, opacity 150ms ease; }
+.cal__arrow .icon { width: 22px; height: 22px; stroke-width: 2; }
+.cal__arrow:active:not(:disabled) { background: var(--fill); }
+.cal__arrow:disabled { color: var(--label-3); cursor: default; }
+.cal__arrow:focus-visible { box-shadow: var(--focus); }
+.cal__title { display: flex; flex-direction: column; align-items: center; font-size: var(--fs-headline); font-weight: 600; }
+.cal__summary { font-size: var(--fs-caption); font-weight: 500; color: var(--label-2); }
+.cal__grid { display: flex; flex-direction: column; gap: 4px; }
+.cal__week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal__wd { text-align: center; font-size: var(--fs-caption); font-weight: 600; color: var(--label-2); padding: 2px 0; }
+.cal__day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  border-radius: var(--r-small);
+  font-size: var(--fs-subhead);
+  font-variant-numeric: tabular-nums;
+  color: var(--label);
+  transition: background-color 150ms ease, transform 100ms ease;
+}
+.cal__day:active { transform: scale(0.94); }
+.cal__day:focus-visible { box-shadow: var(--focus); }
+.cal__day.is-future { color: var(--label-3); }
+.cal__day.is-today .cal__num { color: var(--accent-text); font-weight: 700; }
+.cal__day.is-selected { box-shadow: inset 0 0 0 2px var(--label); }
+/* Played days: a tint of the result colour behind the date, dots in the full colour */
+.cal__day--win { background: color-mix(in srgb, var(--day-win) 22%, transparent); }
+.cal__day--loss { background: color-mix(in srgb, var(--day-loss) 22%, transparent); }
+.cal__day--split { background: color-mix(in srgb, var(--day-split) 26%, transparent); }
+.cal__day--win.cal__day--l3 { background: color-mix(in srgb, var(--day-win) 34%, transparent); }
+.cal__day--loss.cal__day--l3 { background: color-mix(in srgb, var(--day-loss) 34%, transparent); }
+.cal__num { line-height: 1; font-weight: 500; }
+.cal__day--win .cal__num, .cal__day--loss .cal__num, .cal__day--split .cal__num { font-weight: 700; }
+.cal__dots { display: flex; gap: 3px; height: 5px; }
+.cal__dots i { width: 5px; height: 5px; border-radius: 50%; }
+.cal__day--win .cal__dots i { background: var(--day-win); }
+.cal__day--loss .cal__dots i { background: var(--day-loss); }
+.cal__day--split .cal__dots i { background: var(--day-split); }
+.cal__readout { min-height: 20px; font-size: var(--fs-footnote); color: var(--label-2); }
+/* High-contrast / forced colours: lost days get an outline so the result never relies on hue alone */
 @media (prefers-contrast: more), (forced-colors: active) {
-  .cal__day--loss { stroke: var(--label); stroke-width: 1; stroke-dasharray: 2 2; }
+  .cal__day--loss { outline: 1.5px dashed CanvasText; outline-offset: -3px; }
 }
 
 /* ============ Rivalries & friends ============ */

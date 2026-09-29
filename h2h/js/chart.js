@@ -1,15 +1,13 @@
-// The "over time" card: a single-series line chart (rating, series lead or win %) with a
+// The "over time" card: a single-series line chart (win rate or series lead) with a
 // range selector, like chess.com's rating graph. Drag or hover to read any game; arrow keys
 // work too. A visually hidden table carries the same values for screen readers.
-import { RATING_START } from './stats.js';
 import { esc, haptic, reducedMotion } from './ui.js';
 
 const DAY = 86400000;
 
 export const METRICS = {
-  rating: { label: 'Rating', short: 'Rating', base: RATING_START, minSpan: 24, fmt: (v) => Math.round(v).toLocaleString(), delta: (d) => signed(Math.round(d)), even: 'Even (1,200)' },
-  lead: { label: 'Series Lead', short: 'Lead', base: 0, minSpan: 2, fmt: (v) => (Math.round(v) === 0 ? 'Even' : signed(Math.round(v))), delta: (d) => signed(Math.round(d)), even: 'Even' },
   winPct: { label: 'Win Rate', short: 'Win %', base: null, minSpan: 10, fmt: (v) => `${Math.round(v)}%`, delta: (d) => `${signed(Math.round(d))} pts`, even: '50%', evenAt: 50 },
+  lead: { label: 'Series Lead', short: 'Lead', base: 0, minSpan: 2, fmt: (v) => (Math.round(v) === 0 ? 'Even' : signed(Math.round(v))), delta: (d) => signed(Math.round(d)), even: 'Even' },
 };
 
 export const RANGES = [
@@ -37,8 +35,12 @@ export function slice(points, metricId, rangeId, now = Date.now()) {
   const metric = METRICS[metricId];
   const range = RANGES.find((r) => r.id === rangeId) || RANGES.at(-1);
   const start = range.days ? now - range.days * DAY : null;
-  const inRange = points.filter((p) => start === null || p.t >= start);
+  let inRange = points.filter((p) => start === null || p.t >= start);
   const prior = start === null ? null : [...points].reverse().find((p) => p.t < start);
+  // Win rate swings wildly over the first few games (1 game = 0% or 100%), so the all-time view
+  // starts from game 5 once there's enough history, and doesn't claim a "change" from game 1.
+  const settle = metricId === 'winPct' && start === null && points.length >= 8;
+  if (settle) inRange = inRange.slice(4);
 
   let anchor = null;
   if (prior) anchor = { t: start, v: prior[metricId] };
@@ -54,7 +56,8 @@ export function slice(points, metricId, rangeId, now = Date.now()) {
   const current = points.length ? points.at(-1)[metricId] : metric.base;
   const from = anchor ? anchor.v : series[0]?.v;
   const values = [...(anchor ? [anchor.v] : []), ...series.map((s) => s.v)];
-  return { metric, range, anchor, series, xMin, xMax, current, change: from == null || current == null ? null : current - from, peak: values.length ? Math.max(...values) : null, low: values.length ? Math.min(...values) : null };
+  const change = metricId === 'winPct' && start === null ? null : from == null || current == null ? null : current - from;
+  return { metric, range, anchor, series, xMin, xMax, current, change, settled: settle, peak: values.length ? Math.max(...values) : null, low: values.length ? Math.min(...values) : null };
 }
 
 function dateTick(t, span) {
@@ -90,9 +93,9 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
     </div>
     <div class="trend__hero">
       <span class="trend__value">${s.current == null ? '—' : esc(metric.fmt(s.current))}</span>
-      ${s.change != null ? `<span class="trend__delta ${changeClass}">${arrow ? `<span aria-hidden="true">${arrow}</span> ` : ''}${esc(metric.delta(s.change))}</span><span class="trend__phrase">${esc(s.range.phrase)}</span>` : ''}
+      ${s.change != null ? `<span class="trend__delta ${changeClass}">${arrow ? `<span aria-hidden="true">${arrow}</span> ` : ''}${esc(metric.delta(s.change))}</span>` : ''}<span class="trend__phrase">${esc(s.range.phrase)}</span>
     </div>
-    <p class="trend__sub">${games ? `${games} ${games === 1 ? 'game' : 'games'}` : 'No games in this period'}${s.peak != null && games ? ` · High ${esc(metric.fmt(s.peak))} · Low ${esc(metric.fmt(s.low))}` : ''}</p>
+    <p class="trend__sub">${s.settled ? `${points.length} games · from game 5` : games ? `${games} ${games === 1 ? 'game' : 'games'}` : 'No games in this period'}${s.peak != null && games ? ` · High ${esc(metric.fmt(s.peak))} · Low ${esc(metric.fmt(s.low))}` : ''}</p>
     <div class="trend__plot" data-plot>
       ${hasPlot ? '' : '<p class="trend__empty">Log a game to start the chart.</p>'}
     </div>
@@ -239,87 +242,108 @@ const metricIsPct = (m) => m === METRICS.winPct;
 
 // ---------- activity calendar ----------
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 
 /**
- * GitHub-style grid: one column per week (Sunday first), newest week on the right.
- * Colour = who won the day (won / lost / split); shade = how many games (1, 2, 3+).
- * `days` is Map 'YYYY-MM-DD' → { wins, losses }. Tap, hover or arrow-key a day to read it.
+ * A normal month calendar. Days you played are tinted by who won the day (won / lost / split),
+ * with one dot per game underneath the date (up to 3). ‹ › move between months, from the month of
+ * your first game to this month. Tap or arrow-key a day to read it.
+ *   days: Map 'YYYY-MM-DD' → { wins, losses }
+ *   opts: { month: Date (any day in it), onMonth(Date) }
  */
-export function renderActivity(host, days) {
-  const width = Math.max(260, host.clientWidth);
-  const cell = width >= 520 ? 15 : 13, gap = 3, left = 28, top = 16;
-  const weeks = Math.max(12, Math.min(26, Math.floor((width - left + gap) / (cell + gap))));
+export function renderMonthCalendar(host, days, { month, onMonth }) {
   const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  const start = new Date(today);
-  start.setDate(start.getDate() - today.getDay() - (weeks - 1) * 7); // Sunday, `weeks` weeks ago
+  const keys = [...days.keys()].sort();
+  const first = keys.length ? monthStart(new Date(`${keys[0]}T12:00:00`)) : monthStart(today);
+  const last = monthStart(today);
+  let shown = monthStart(month || today);
+  if (shown < first) shown = first;
+  if (shown > last) shown = last;
+  const canPrev = shown > first, canNext = shown < last;
 
+  const firstWeekday = shown.getDay();
+  const daysInMonth = new Date(shown.getFullYear(), shown.getMonth() + 1, 0).getDate();
+  const weekdayNames = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'narrow' }));
+  const fullWeekday = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'long' }));
+
+  let games = 0, wins = 0, losses = 0;
   const cells = [];
-  let games = 0, gameDays = 0, busiest = 0;
-  const monthLabels = [];
-  for (let w = 0; w < weeks; w++) {
-    for (let d = 0; d < 7; d++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + w * 7 + d);
-      if (date > today) continue;
-      if (d === 0 && (w === 0 || date.getDate() <= 7)) monthLabels.push({ w, label: date.toLocaleDateString(undefined, { month: 'short' }) });
-      const key = iso(date);
-      const rec = days.get(key);
-      const n = rec ? rec.wins + rec.losses : 0;
-      if (n) (games += n), gameDays++, (busiest = Math.max(busiest, n));
-      const kind = !n ? 'none' : rec.wins > rec.losses ? 'win' : rec.losses > rec.wins ? 'loss' : 'split';
-      cells.push({ w, d, key, date, n, rec, kind, level: Math.min(3, n) });
-    }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(shown.getFullYear(), shown.getMonth(), d, 12);
+    const rec = days.get(iso(date));
+    const n = rec ? rec.wins + rec.losses : 0;
+    if (n) (games += n), (wins += rec.wins), (losses += rec.losses);
+    const kind = !n ? 'none' : rec.wins > rec.losses ? 'win' : rec.losses > rec.wins ? 'loss' : 'split';
+    cells.push({ d, date, rec, n, kind, future: date > today, today: iso(date) === iso(today) });
   }
-  // Drop a month label that would collide with the next one
-  const labels = monthLabels.filter((m, i) => !monthLabels[i + 1] || monthLabels[i + 1].w - m.w >= 3);
-  const W = left + weeks * (cell + gap) - gap, H = top + 7 * (cell + gap) - gap;
-
+  const title = shown.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const describe = (c) => {
-    const when = c.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    if (!c.n) return `${when} · No games`;
-    const result = c.kind === 'win' ? 'won the day' : c.kind === 'loss' ? 'lost the day' : 'split the day';
-    return `${when} · ${c.n} ${c.n === 1 ? 'game' : 'games'} · ${result} ${c.rec.wins}–${c.rec.losses}`;
+    const when = c.date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    if (!c.n) return `${when}: no games`;
+    const result = c.kind === 'win' ? 'you won the day' : c.kind === 'loss' ? 'you lost the day' : 'split';
+    return `${when}: ${c.n} ${c.n === 1 ? 'game' : 'games'}, ${result} ${c.rec.wins}–${c.rec.losses}`;
   };
 
   host.innerHTML = `
-    <svg class="cal__svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" tabindex="0"
-         aria-label="Activity over the last ${weeks} weeks: ${games} games on ${gameDays} days. Use arrow keys to read each day.">
-      ${labels.map((m) => `<text class="cal__label" x="${left + m.w * (cell + gap)}" y="10">${esc(m.label)}</text>`).join('')}
-      ${[1, 3, 5].map((d) => `<text class="cal__label" x="0" y="${top + d * (cell + gap) + cell - 3}">${DAY_NAMES[d]}</text>`).join('')}
-      ${cells.map((c, i) => `<rect class="cal__day cal__day--${c.kind} cal__day--l${c.level}" data-i="${i}" x="${left + c.w * (cell + gap)}" y="${top + c.d * (cell + gap)}" width="${cell}" height="${cell}" rx="3"/>`).join('')}
-      <rect class="cal__focus" width="${cell + 4}" height="${cell + 4}" rx="4" hidden/>
-    </svg>
-    <p class="cal__readout" role="status" aria-live="polite">${esc(games ? `Tap a day to see it. Busiest day: ${busiest} ${busiest === 1 ? 'game' : 'games'}.` : 'No games in this stretch yet.')}</p>`;
+    <div class="cal__nav">
+      <button type="button" class="cal__arrow" data-cal="-1" aria-label="Previous month"${canPrev ? '' : ' disabled'}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.75 8.25 12l6.25 6.25"/></svg></button>
+      <div class="cal__title"><span>${esc(title)}</span><span class="cal__summary">${games ? `${games} ${games === 1 ? 'game' : 'games'} · ${wins}–${losses}` : 'No games'}</span></div>
+      <button type="button" class="cal__arrow" data-cal="1" aria-label="Next month"${canNext ? '' : ' disabled'}><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button>
+    </div>
+    <div class="cal__grid" role="grid" aria-label="${esc(title)}">
+      <div class="cal__week" role="row">${weekdayNames.map((w, i) => `<span class="cal__wd" role="columnheader" aria-label="${esc(fullWeekday[i])}">${esc(w)}</span>`).join('')}</div>
+      ${(() => {
+        const slots = [...Array(firstWeekday).fill(null), ...cells];
+        while (slots.length % 7) slots.push(null);
+        const rows = [];
+        for (let i = 0; i < slots.length; i += 7) rows.push(slots.slice(i, i + 7));
+        return rows
+          .map(
+            (row) => `<div class="cal__week" role="row">${row
+              .map((c) =>
+                c
+                  ? `<button type="button" role="gridcell" class="cal__day cal__day--${c.kind}${c.n ? ` cal__day--l${Math.min(3, c.n)}` : ''}${c.today ? ' is-today' : ''}${c.future ? ' is-future' : ''}" data-d="${c.d}" tabindex="-1" aria-label="${esc(describe(c))}">
+                      <span class="cal__num">${c.d}</span>${c.n ? `<span class="cal__dots" aria-hidden="true">${'<i></i>'.repeat(Math.min(3, c.n))}</span>` : ''}
+                    </button>`
+                  : '<span class="cal__blank" role="gridcell"></span>',
+              )
+              .join('')}</div>`,
+          )
+          .join('');
+      })()}
+    </div>
+    <p class="cal__readout" role="status" aria-live="polite">${games ? 'Tap a day to see its games.' : ''}</p>`;
 
-  const svg = host.querySelector('svg');
   const readout = host.querySelector('.cal__readout');
-  const ring = svg.querySelector('.cal__focus');
-  let active = -1;
-  const select = (i) => {
-    if (i < 0 || i >= cells.length) return;
+  const buttons = [...host.querySelectorAll('.cal__day')];
+  let active = cells.findIndex((c) => c.today);
+  if (active < 0) active = 0;
+  buttons[active].tabIndex = 0;
+  const select = (i, focus) => {
+    i = Math.max(0, Math.min(cells.length - 1, i));
+    buttons.forEach((b, j) => {
+      b.tabIndex = j === i ? 0 : -1;
+      b.classList.toggle('is-selected', j === i);
+    });
     active = i;
-    const c = cells[i];
-    ring.hidden = false;
-    ring.setAttribute('x', left + c.w * (cell + gap) - 2);
-    ring.setAttribute('y', top + c.d * (cell + gap) - 2);
-    readout.textContent = describe(c);
+    readout.textContent = describe(cells[i]);
+    if (focus) buttons[i].focus();
   };
-  svg.addEventListener('pointerdown', (e) => {
-    const r = e.target.closest?.('.cal__day');
-    if (r) select(+r.dataset.i);
+  host.querySelector('.cal__grid').addEventListener('click', (e) => {
+    const b = e.target.closest('.cal__day');
+    if (b) select(+b.dataset.d - 1);
   });
-  svg.addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'mouse') return;
-    const r = e.target.closest?.('.cal__day');
-    if (r) select(+r.dataset.i);
-  });
-  svg.addEventListener('keydown', (e) => {
-    const step = { ArrowLeft: -7, ArrowRight: 7, ArrowUp: -1, ArrowDown: 1 }[e.key];
+  host.querySelector('.cal__grid').addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
     if (step == null) return;
     e.preventDefault();
-    select(active < 0 ? cells.length - 1 : Math.min(cells.length - 1, Math.max(0, active + step)));
+    select(active + step, true);
   });
+  host.querySelectorAll('[data-cal]').forEach((b) =>
+    b.addEventListener('click', () => {
+      haptic('light');
+      onMonth(new Date(shown.getFullYear(), shown.getMonth() + Number(b.dataset.cal), 1));
+    }),
+  );
 }

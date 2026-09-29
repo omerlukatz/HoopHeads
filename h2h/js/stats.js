@@ -95,14 +95,8 @@ export function recentTeams(viewList, key, limit = 5) {
 
 // ---------- over time ----------
 
-export const RATING_START = 1200;
-const K = 24;
-
 /**
  * One point per game, oldest → newest, from `playerId`'s side:
- *   rating  – head-to-head Elo. Both players start at 1200 and the ratings mirror each other
- *             (theirs = 2400 − yours). Beating a higher-rated opponent earns more, and the margin
- *             nudges it: a 1-point game counts ~0.85×, a 30-point blowout 1.25× (never more).
  *   lead    – net wins so far (wins − losses).
  *   winPct  – win percentage so far.
  * `t` is a timestamp: the game's date, with same-day games spread across that day in play order.
@@ -112,18 +106,14 @@ export function timeline(games, playerId) {
   const perDay = new Map();
   list.forEach((g) => perDay.set(g.date, (perDay.get(g.date) || 0) + 1));
   const seen = new Map();
-  let rating = RATING_START, wins = 0;
+  let wins = 0;
   return list.map((g, i) => {
-    const opp = 2 * RATING_START - rating;
-    const expected = 1 / (1 + 10 ** ((opp - rating) / 400));
-    const mov = Math.min(1.25, 0.75 + (0.5 * Math.log(Math.abs(g.margin) + 1)) / Math.log(31));
-    rating += K * mov * ((g.win ? 1 : 0) - expected);
     if (g.win) wins++;
     const k = seen.get(g.date) || 0;
     seen.set(g.date, k + 1);
     const [y, m, d] = g.date.split('-').map(Number);
     const t = new Date(y, m - 1, d).getTime() + ((k + 1) / (perDay.get(g.date) + 1)) * 86400000;
-    return { t, game: g, rating, lead: 2 * wins - (i + 1), winPct: (wins / (i + 1)) * 100 };
+    return { t, game: g, lead: 2 * wins - (i + 1), winPct: (wins / (i + 1)) * 100 };
   });
 }
 

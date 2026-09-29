@@ -3,7 +3,7 @@ import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
-import { renderTrendCard, renderActivity, METRICS, RANGES } from './chart.js';
+import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, changePinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
@@ -19,15 +19,15 @@ const ui = {
   justSaved: false,
   trend: loadTrendPrefs(),
   teamsSide: 'myTeam',
-  teamsAll: false,
+  calMonth: null, // first day of the month shown in the Activity calendar
 };
 
 function loadTrendPrefs() {
   try {
     const t = JSON.parse(localStorage.getItem('h2h.trend') || '{}');
-    return { metric: METRICS[t.metric] ? t.metric : 'rating', range: RANGES.some((r) => r.id === t.range) ? t.range : 'All' };
+    return { metric: METRICS[t.metric] ? t.metric : 'winPct', range: RANGES.some((r) => r.id === t.range) ? t.range : 'All' };
   } catch {
-    return { metric: 'rating', range: 'All' };
+    return { metric: 'winPct', range: 'All' };
   }
 }
 
@@ -93,7 +93,7 @@ document.addEventListener('click', (e) => {
   const action = e.target.closest('[data-action]');
   if (!action) return;
   const { action: name, id } = action.dataset;
-  if (name === 'log' || name === 'rematch') openGameSheet();
+  if (name === 'log') openGameSheet();
   else if (name === 'edit') openGameSheet({ id });
   else if (name === 'delete') removeGame(id);
   else if (name === 'retry') store.sync();
@@ -239,11 +239,9 @@ function renderDashboard() {
   }
   if (!state.loaded) {
     el.innerHTML = `<div class="dash-grid" aria-busy="true" aria-label="Loading">
-      <div class="card skel-card area-hero" style="min-height:212px"></div>
-      <div class="card skel-card area-rematch" style="min-height:72px"></div>
-      <div class="card skel-card area-streak" style="min-height:110px"></div>
-      <div class="card skel-card area-longest" style="min-height:110px"></div>
-      <div class="card skel-card area-scoring" style="min-height:104px"></div></div>`;
+      <div class="card skel-card area-hero" style="min-height:236px"></div>
+      <div class="card skel-card area-scoring" style="min-height:104px"></div>
+      <div class="card skel-card area-trend" style="min-height:320px"></div></div>`;
     return;
   }
   if (!store.rival()) {
@@ -270,7 +268,6 @@ function renderDashboard() {
       : s.wins > s.losses
         ? `You lead ${opp} ${s.wins}–${s.losses}`
         : `${opp} leads you ${s.losses}–${s.wins}`;
-  const last = s.latest;
   const gameTile = (key, title, g, emptyText) =>
     g
       ? `<button type="button" class="card tile tile--game area-${key}" data-action="edit" data-id="${g.id}" aria-label="${title}: ${g.myScore} to ${g.oppScore}, ${shortDate(g.date)}. Edit game.">
@@ -301,30 +298,11 @@ function renderDashboard() {
           <p class="hero__sub">${h2h}</p>
         </div>
       </div>
-      <div class="hero__last5">
-        <span class="hero__label" id="last5-label">Last ${s.last5.length}</span>
-        <span class="pills" role="list" aria-labelledby="last5-label">${s.last5.map((w) => `<span role="listitem">${wlPill(w)}</span>`).join('')}</span>
-      </div>
-    </section>
-
-    <section class="card trend area-trend" id="trend-card" aria-labelledby="trend-title"></section>
-
-    <button type="button" class="card rematch area-rematch" data-action="rematch">
-      <span class="rematch__logos">${logo(last.myTeam, { size: 'md', alt: '' })}${logo(last.oppTeam, { size: 'md', alt: '' })}</span>
-      <span class="rematch__text"><span class="rematch__title">Rematch</span><span class="rematch__sub">${getTeam(last.myTeam)?.nickname} vs ${getTeam(last.oppTeam)?.nickname}</span></span>
-      <span class="rematch__icon">${icon('rematch')}</span>
-    </button>
-
-    <section class="card tile area-streak">
-      <h3 class="tile__title">Current Streak</h3>
-      <p class="tile__value ${s.streak.win ? 'is-win' : 'is-loss'}">${s.streak.win ? 'W' : 'L'}${num('streak', s.streak.count)}</p>
-      <p class="tile__sub">${s.streak.count === 1 ? (s.streak.win ? 'You won the last game' : 'You lost the last game') : `${s.streak.count} ${s.streak.win ? 'wins' : 'losses'} in a row`}</p>
-    </section>
-
-    <section class="card tile area-longest">
-      <h3 class="tile__title">Longest Streak</h3>
-      <p class="tile__value is-win">W${num('longest', s.longestWin)}</p>
-      <p class="tile__sub">Longest skid: ${s.longestLoss} ${s.longestLoss === 1 ? 'loss' : 'losses'}</p>
+      <dl class="hero__streaks">
+        <div><dt>Current Streak</dt><dd class="${s.streak.win ? 'is-win' : 'is-loss'}" aria-label="${s.streak.count} ${s.streak.win ? (s.streak.count === 1 ? 'win' : 'wins') : s.streak.count === 1 ? 'loss' : 'losses'} in a row">${s.streak.win ? 'W' : 'L'}${num('streak', s.streak.count)}</dd></div>
+        <div><dt>Longest Win</dt><dd class="${s.longestWin ? 'is-win' : ''}" aria-label="Longest winning streak: ${s.longestWin}">W${num('longestWin', s.longestWin)}</dd></div>
+        <div><dt>Longest Loss</dt><dd class="${s.longestLoss ? 'is-loss' : ''}" aria-label="Longest losing streak: ${s.longestLoss}">L${num('longestLoss', s.longestLoss)}</dd></div>
+      </dl>
     </section>
 
     <section class="card tile area-scoring">
@@ -335,6 +313,8 @@ function renderDashboard() {
         <div><dt>Avg Margin</dt><dd class="${s.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${num('margin', s.avgMargin, { decimals: 1, signed: true })}</dd></div>
       </dl>
     </section>
+
+    <section class="card trend area-trend" id="trend-card" aria-labelledby="trend-title"></section>
 
     ${gameTile('blowout', 'Biggest Win', s.biggestWin, 'No wins yet.')}
     ${gameTile('closest', 'Closest Game', s.closest)}
@@ -350,7 +330,7 @@ function renderDashboard() {
           <span><i class="cal-key cal-key--win"></i>Won</span><span><i class="cal-key cal-key--loss"></i>Lost</span><span><i class="cal-key cal-key--split"></i>Split</span>
         </span>
       </div>
-      <p class="activity__sub">Each square is a day. Darker means more games.</p>
+      <p class="activity__sub">Days you played, coloured by who won the day. Dots show how many games.</p>
       <div class="activity__plot" id="activity-plot"></div>
     </section>
 
@@ -366,7 +346,7 @@ function renderDashboard() {
   animateNumbers(el);
   renderTrend();
   renderTeams();
-  renderActivity($('#activity-plot'), activityByDay(ui.views));
+  renderCalendar();
   const ring = $('.ring__value', el);
   requestAnimationFrame(() => requestAnimationFrame(() => ring.setAttribute('stroke-dashoffset', ring.dataset.offset)));
 }
@@ -390,42 +370,53 @@ function clutchTile() {
   </section>`;
 }
 
-const TEAMS_SHOWN = 5;
+/**
+ * Best and worst team for one side. Teams with 2+ games are preferred so a single lucky game
+ * doesn't top the list. For the opponent's side the record is shown from their point of view.
+ */
+function bestAndWorst(side) {
+  let rows = teamRecords(ui.views, side);
+  if (side === 'oppTeam') rows = rows.map((r) => ({ ...r, wins: r.losses, losses: r.wins, pct: r.losses / r.games }));
+  const pool = rows.some((r) => r.games >= 2) ? rows.filter((r) => r.games >= 2) : rows;
+  const byBest = pool.slice().sort((a, b) => b.pct - a.pct || b.games - a.games);
+  const best = byBest[0] || null;
+  const worst = byBest.length > 1 ? byBest.at(-1) : null;
+  return { best, worst, teams: rows.length };
+}
+
 function renderTeams() {
   const card = $('#teams-card');
   if (!card) return;
   const side = ui.teamsSide;
-  const rows = teamRecords(ui.views, side);
-  const shown = ui.teamsAll ? rows : rows.slice(0, TEAMS_SHOWN);
+  const mine = side === 'myTeam';
+  const who = mine ? 'You' : oppName();
+  const { best, worst, teams } = bestAndWorst(side);
   const opts = [
-    { value: 'myTeam', label: 'Your Teams' },
-    { value: 'oppTeam', label: `${oppName()}’s` },
+    { value: 'myTeam', label: 'You' },
+    { value: 'oppTeam', label: oppName() },
   ];
   const index = opts.findIndex((o) => o.value === side);
+  const row = (kind, r) => {
+    if (!r) return '';
+    const t = getTeam(r.abbr);
+    return `<li class="teams__row">
+      <span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>
+      ${logo(r.abbr, { size: 'md', alt: '' })}
+      <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
+      <span class="teams__record" aria-label="${esc(t?.name || r.abbr)}: ${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span>
+    </li>`;
+  };
   card.innerHTML = `
     <div class="teams__top">
-      <h3 class="tile__title" id="teams-title">Team Matchups</h3>
+      <h3 class="tile__title" id="teams-title">Best &amp; Worst Teams</h3>
       <div class="seg" role="radiogroup" aria-label="Whose teams" style="--count:2;--index:${index}">
         <span class="seg__thumb" aria-hidden="true"></span>
         ${opts.map((o, i) => `<button type="button" class="seg__item" role="radio" aria-checked="${i === index}" tabindex="${i === index ? 0 : -1}" data-teams="${o.value}">${esc(o.label)}</button>`).join('')}
       </div>
     </div>
-    <p class="activity__sub">${side === 'myTeam' ? 'Your record with each team you’ve played as.' : `Your record against each team ${esc(oppName())} has played as.`}</p>
-    <ul class="teams__list" role="list">
-      ${shown
-        .map((r) => {
-          const t = getTeam(r.abbr);
-          const cls = r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss';
-          return `<li class="teams__row">
-            ${logo(r.abbr, { size: 'sm', alt: '' })}
-            <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}%</span></span>
-            <span class="teams__bar" aria-hidden="true"><span style="width:${Math.round(r.pct * 100)}%"></span></span>
-            <span class="teams__record ${cls}" aria-label="${esc(t?.name || r.abbr)}: ${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span>
-          </li>`;
-        })
-        .join('')}
-    </ul>
-    ${rows.length > TEAMS_SHOWN ? `<button type="button" class="link teams__more" data-teams-more>${ui.teamsAll ? 'Show fewer' : `Show all ${rows.length} teams`}</button>` : ''}`;
+    <p class="activity__sub">${mine ? 'Teams you played as, by your win rate with them.' : `Teams ${esc(oppName())} played as, by their win rate against you.`}${teams ? ` ${teams} ${teams === 1 ? 'team' : 'teams'} used.` : ''}</p>
+    ${best ? `<ul class="teams__list" role="list">${row('best', best)}${row('worst', worst)}</ul>` : `<p class="tile__empty">No games yet.</p>`}
+    ${best && !worst ? `<p class="activity__sub">Play with another team to see a worst team.</p>` : ''}`;
   card.querySelectorAll('[data-teams]').forEach((b) =>
     b.addEventListener('click', () => {
       if (ui.teamsSide === b.dataset.teams) return;
@@ -434,9 +425,17 @@ function renderTeams() {
       renderTeams();
     }),
   );
-  card.querySelector('[data-teams-more]')?.addEventListener('click', () => {
-    ui.teamsAll = !ui.teamsAll;
-    renderTeams();
+}
+
+function renderCalendar() {
+  const host = $('#activity-plot');
+  if (!host) return;
+  renderMonthCalendar(host, activityByDay(ui.views), {
+    month: ui.calMonth,
+    onMonth: (m) => {
+      ui.calMonth = m;
+      renderCalendar();
+    },
   });
 }
 
@@ -467,8 +466,6 @@ new ResizeObserver(() => {
   if (w && Math.abs(w - trendWidth) > 2) {
     trendWidth = w;
     renderTrend();
-    const plot = $('#activity-plot');
-    if (plot) renderActivity(plot, activityByDay(ui.views));
   }
 }).observe(document.getElementById('dashboard-content'));
 
@@ -796,9 +793,9 @@ function initSwipe() {
 
 // ---------- game sheet ----------
 
-function teamTile(side, abbr) {
+function teamTile(side, abbr, opponentName = oppName()) {
   const team = getTeam(abbr);
-  const who = side === 'myTeam' ? 'Your team' : `${oppName()}’s team`;
+  const who = side === 'myTeam' ? 'Your team' : `${opponentName}’s team`;
   return `<button type="button" class="team-tile${team ? '' : ' is-empty'}" data-pick="${side}" aria-label="${esc(who)}: ${team ? esc(team.name) : 'none chosen'}. Change team">
     ${team ? logo(abbr, { size: 'xl', alt: '' }) : `<span class="team-tile__placeholder">${icon('log')}</span>`}
     <span class="team-tile__name">${team ? esc(team.nickname) : 'Choose Team'}</span>
@@ -817,11 +814,17 @@ function openGameSheet({ id = null } = {}) {
   if (id && !source) return;
   const editing = Boolean(source);
   const view = ui.views.find((g) => g.id === id);
-  const last = ui.views[0];
+  // Who the game is against: fixed when editing; for a new game it starts as the current rivalry
+  // and can be switched by tapping the opponent's name.
+  const otherId = editing ? (source.player1_id === meId() ? source.player2_id : source.player1_id) : state.rivalId;
+  let opponent = state.friends.find((f) => f.id === otherId) || store.rival();
+  const lastVs = (fid) => views(store.pairGames(fid), meId())[0];
+  const last = lastVs(opponent.id);
   const draft = editing
     ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note }
-    : { date: todayISO(), myTeam: last?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '' };
-  const opp = oppName();
+    : { date: todayISO(), myTeam: last?.myTeam ?? ui.views[0]?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '' };
+  const opp = opponent.display_name;
+  const canSwitch = !editing && state.friends.length > 1;
 
   const content = document.createElement('div');
   content.className = 'sheet__content';
@@ -840,8 +843,12 @@ function openGameSheet({ id = null } = {}) {
         </div>
         <span class="matchup__vs" aria-hidden="true">VS</span>
         <div class="side">
-          <span class="side__name">${esc(opp)}</span>
-          <div class="side__tile" data-slot="oppTeam">${teamTile('oppTeam', draft.oppTeam)}</div>
+          ${
+            canSwitch
+              ? `<button type="button" class="side__name side__name--switch" data-pick-opp aria-label="Playing against ${esc(opp)}. Change opponent"><span data-opp-name>${esc(opp)}</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.75 9.75 5.25 5.25 5.25-5.25"/></svg></button>`
+              : `<span class="side__name">${esc(opp)}</span>`
+          }
+          <div class="side__tile" data-slot="oppTeam">${teamTile('oppTeam', draft.oppTeam, opp)}</div>
           <input class="score-input" id="score-opp" name="oppScore" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="done" placeholder="0" aria-label="${esc(opp)}’s score" value="${draft.oppScore}">
         </div>
       </div>
@@ -894,14 +901,33 @@ function openGameSheet({ id = null } = {}) {
   const sheet = openSheet({ content, labelledBy: 'game-sheet-title', initialFocus: '#score-me' });
 
   content.addEventListener('click', async (e) => {
+    const oppBtn = e.target.closest('[data-pick-opp]');
+    if (oppBtn) {
+      const chosen = await openOpponentPicker(opponent.id);
+      if (!chosen || chosen.id === opponent.id) return;
+      opponent = chosen;
+      $('[data-opp-name]', oppBtn).textContent = chosen.display_name;
+      oppBtn.setAttribute('aria-label', `Playing against ${chosen.display_name}. Change opponent`);
+      form.oppScore.setAttribute('aria-label', `${chosen.display_name}’s score`);
+      // Pre-fill the teams from your last game against this friend
+      const prev = lastVs(chosen.id);
+      if (prev) Object.assign(draft, { myTeam: prev.myTeam, oppTeam: prev.oppTeam });
+      for (const side of ['myTeam', 'oppTeam']) $(`[data-slot="${side}"]`, content).innerHTML = teamTile(side, draft[side], chosen.display_name);
+      const tile = $('[data-slot="oppTeam"] .team-tile', content);
+      tile.classList.add('is-popping');
+      tile.addEventListener('animationend', () => tile.classList.remove('is-popping'), { once: true });
+      oppBtn.focus({ preventScroll: true });
+      validate();
+      return;
+    }
     const pick = e.target.closest('[data-pick]');
     if (pick) {
       const side = pick.dataset.pick;
-      const chosen = await openTeamPicker(side, draft[side]);
+      const chosen = await openTeamPicker(side, draft[side], opponent);
       if (!chosen) return;
       draft[side] = chosen;
       const slot = $(`[data-slot="${side}"]`, content);
-      slot.innerHTML = teamTile(side, chosen);
+      slot.innerHTML = teamTile(side, chosen, opponent.display_name);
       const tile = $('.team-tile', slot);
       tile.classList.add('is-popping');
       tile.addEventListener('animationend', () => tile.classList.remove('is-popping'), { once: true });
@@ -933,14 +959,17 @@ function openGameSheet({ id = null } = {}) {
       overtime: d.overtime,
       note: d.note,
       [`player${mine}_id`]: meId(),
-      [`player${theirs}_id`]: store.rival().id,
+      [`player${theirs}_id`]: opponent.id,
       [`player${mine}_score`]: Number(d.myScore),
       [`player${theirs}_score`]: Number(d.oppScore),
       [`player${mine}_team`]: d.myTeam,
       [`player${theirs}_team`]: d.oppTeam,
     };
     if (editing) store.updateGame({ ...neutral, id: source.id });
-    else store.addGame(neutral);
+    else {
+      store.addGame(neutral);
+      if (opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged
+    }
     haptic('success');
     sheet.close();
   });
@@ -948,12 +977,55 @@ function openGameSheet({ id = null } = {}) {
   validate();
 }
 
+// ---------- opponent picker ----------
+
+/** Pick which friend a new game is against. Resolves the friend, or null if cancelled. */
+function openOpponentPicker(currentId) {
+  return new Promise((resolve) => {
+    const friends = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
+    const content = document.createElement('div');
+    content.className = 'sheet__content';
+    content.innerHTML = `
+      <header class="sheet__header">
+        <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
+        <h2 id="opp-title" class="sheet__title">Playing Against</h2>
+        <span></span>
+      </header>
+      <div class="sheet__body">
+        <ul class="list list--friends list--sheet" role="list">
+          ${friends
+            .map((f) => {
+              const r = friendRecord(f.id);
+              const on = f.id === currentId;
+              return `<li><button type="button" class="cell cell--button friend-row" data-opp="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}"${on ? ' aria-current="true"' : ''}>
+                ${avatar(f, 'md')}
+                <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
+                <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
+                ${on ? icon('check', 'friend-row__check') : '<span class="friend-row__check" aria-hidden="true"></span>'}
+              </button></li>`;
+            })
+            .join('')}
+        </ul>
+      </div>`;
+    let chosen = null;
+    const sheet = openSheet({ content, labelledBy: 'opp-title', onClose: () => resolve(chosen) });
+    content.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-opp]');
+      if (b) {
+        chosen = state.friends.find((f) => f.id === b.dataset.opp) || null;
+        haptic('light');
+        sheet.close();
+      } else if (e.target.closest('[data-sheet="cancel"]')) sheet.close();
+    });
+  });
+}
+
 // ---------- team picker ----------
 
-function openTeamPicker(side, current) {
+function openTeamPicker(side, current, opponent = store.rival()) {
   return new Promise((resolve) => {
-    const whose = side === 'myTeam' ? 'You' : oppName();
-    const recent = recentTeams(ui.views, side, 5);
+    const whose = side === 'myTeam' ? 'You' : opponent?.display_name || oppName();
+    const recent = recentTeams(opponent ? views(store.pairGames(opponent.id), meId()) : ui.views, side, 5);
     const cell = (team, lazy) => {
       const selected = team.abbr === current;
       return `<button type="button" class="team-cell${selected ? ' is-selected' : ''}" data-abbr="${team.abbr}" aria-label="${esc(team.name)}"${selected ? ' aria-current="true"' : ''}>
@@ -1339,7 +1411,7 @@ function onStoreChange(detail) {
     }
     return;
   }
-  if (detail.rival) ui.shown = {}; // new rivalry: count up from zero again
+  if (detail.rival) (ui.shown = {}), (ui.calMonth = null); // new rivalry: fresh count-up, current month
   if (detail.saved) {
     ui.justSaved = true;
     clearTimeout(savedTimer);
