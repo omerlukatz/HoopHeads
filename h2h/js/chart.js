@@ -78,7 +78,7 @@ function segmented(name, label, options, value) {
  * Renders the whole card into `card`.
  * opts: { points, metric, range, opponent, onChange({ metric?, range? }) }
  */
-export function renderTrendCard(card, { points, metric: metricId, range: rangeId, opponent, onChange }) {
+export function renderTrendCard(card, { points, metric: metricId, range: rangeId, opponent, onChange, titleId = 'trend-title' }) {
   const s = slice(points, metricId, rangeId);
   const { metric } = s;
   const hasPlot = s.series.length > 0 || s.anchor;
@@ -88,7 +88,7 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
 
   card.innerHTML = `
     <div class="trend__top">
-      <h3 class="tile__title" id="trend-title">${esc(metric.label)} vs ${esc(opponent)}</h3>
+      <h3 class="tile__title" id="${titleId}">${esc(metric.label)} ${esc(opponent)}</h3>
       ${segmented('metric', 'Chart shows', Object.entries(METRICS).map(([value, m]) => ({ value, label: m.short })), metricId)}
     </div>
     <div class="trend__hero">
@@ -124,10 +124,10 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
     });
   });
 
-  if (hasPlot) drawPlot(card.querySelector('[data-plot]'), s);
+  if (hasPlot) drawPlot(card.querySelector('[data-plot]'), s, titleId);
 }
 
-function drawPlot(host, s) {
+function drawPlot(host, s, titleId) {
   const { metric, anchor, series } = s;
   const W = Math.max(240, host.clientWidth);
   const H = W >= 520 ? 220 : 176;
@@ -164,7 +164,7 @@ function drawPlot(host, s) {
   const last = series.at(-1);
 
   host.innerHTML = `
-    <svg class="trend__svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="trend-title" tabindex="0">
+    <svg class="trend__svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${titleId}" tabindex="0">
       <g class="trend__grid">
         ${yTicks.map((v) => `<line x1="${M.left}" x2="${W - M.right}" y1="${y(v)}" y2="${y(v)}"/><text class="trend__ylabel" x="${M.left - 8}" y="${y(v)}" dy="0.32em">${esc(metric.fmt(v))}</text>`).join('')}
         ${xTicks.map((t, i) => `<text class="trend__xlabel" x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}">${esc(dateTick(t, s.xMax - s.xMin))}</text>`).join('')}

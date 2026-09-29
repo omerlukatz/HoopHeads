@@ -12,6 +12,7 @@
 //   blockUser(token, userId)            -> {}      (also removes the friendship)
 //   unblockUser(token, userId)          -> {}
 //   getBlocked(token)                   -> [user]
+//   getProfile(token, userId)           -> { user, opponents: [user], games } (friends or yourself only)
 //   getGames(token)                     -> [game]  (every non-deleted game you played in)
 //   addGame(token, game)                -> game    (idempotent by id, safe to retry)
 //   updateGame(token, game)             -> game    (also used to un-delete)
@@ -84,6 +85,7 @@ const remote = {
   blockUser: (token, userId) => call('POST', { action: 'blockUser', token, userId }),
   unblockUser: (token, userId) => call('POST', { action: 'unblockUser', token, userId }),
   getBlocked: (token) => call('GET', { action: 'blocked', token }),
+  getProfile: (token, userId) => call('GET', { action: 'profile', token, userId }),
   getGames: (token) => call('GET', { action: 'games', token }),
   addGame: (token, game) => call('POST', { action: 'addGame', token, game }),
   updateGame: (token, game) => call('POST', { action: 'updateGame', token, game }),
@@ -92,5 +94,5 @@ const remote = {
 
 const backend = isDemo ? demo.createDemoBackend(ApiError) : remote;
 
-export const { signUp, signIn, signOut, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getGames, addGame, updateGame, deleteGame } = backend;
+export const { signUp, signIn, signOut, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame } = backend;
 export const demoControls = isDemo ? demo.controls : null;

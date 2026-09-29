@@ -1,7 +1,7 @@
 // Service worker: network-first for the app shell (always fresh when online, works offline),
 // cache-first for logos and icons (they never change between releases).
 // Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v11';
+const VERSION = 'h2h-v13';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'css/tokens.css', 'css/app.css',

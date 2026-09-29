@@ -14,6 +14,7 @@ export function perspective(game, playerId) {
     oppScore,
     myTeam: game[`player${mine}_team`],
     oppTeam: game[`player${theirs}_team`],
+    oppId: game[`player${theirs}_id`],
     overtime: Boolean(game.overtime),
     note: game.note || '',
     win: myScore > oppScore,
@@ -157,4 +158,16 @@ export function activityByDay(viewList) {
     days.set(g.date, d);
   }
   return days;
+}
+
+/** Record against each opponent (for a profile). `viewList` is from the profile owner's side. */
+export function opponentRecords(viewList) {
+  const by = new Map();
+  for (const g of viewList) {
+    const r = by.get(g.oppId) || { id: g.oppId, wins: 0, losses: 0, last: g.date };
+    g.win ? r.wins++ : r.losses++;
+    if (g.date > r.last) r.last = g.date;
+    by.set(g.oppId, r);
+  }
+  return [...by.values()].map((r) => ({ ...r, games: r.wins + r.losses })).sort((a, b) => b.games - a.games || b.last.localeCompare(a.last));
 }

@@ -44,6 +44,12 @@ export const state = {
 };
 let outbox = [];
 
+// ---------- names ----------
+
+/** "omer" → "Omer": first letter of each word capitalised, so names look tidy even if typed in lowercase. */
+export const niceName = (name) => String(name || '').trim().replace(/\s+/g, ' ').replace(/(^|\s)(\S)/g, (m, space, ch) => space + ch.toUpperCase());
+const tidy = (u) => (u ? { ...u, display_name: niceName(u.display_name), initial: String(u.initial || niceName(u.display_name)[0] || '?').toUpperCase() } : u);
+
 // ---------- events ----------
 
 const listeners = new Set();
@@ -57,8 +63,8 @@ const emit = (detail = {}) => listeners.forEach((fn) => fn(detail));
 
 function loadAccount(userId) {
   const c = read(K.cache(userId), {});
-  state.me = c.me || null;
-  state.friends = c.friends || [];
+  state.me = tidy(c.me || null);
+  state.friends = (c.friends || []).map(tidy);
   state.rivalId = c.rivalId || null;
   state.serverGames = c.games || [];
   state.loaded = Array.isArray(c.games);
@@ -138,7 +144,7 @@ export function setPrefs(patch) {
 // ---------- accounts & auth ----------
 
 /** Accounts that have signed in on this device, most recent first (for "Continue as …"). */
-export const deviceAccounts = () => read(K.accounts, []);
+export const deviceAccounts = () => read(K.accounts, []).map(tidy);
 function rememberAccount(user) {
   const list = deviceAccounts().filter((a) => a.id !== user.id);
   write(K.accounts, [user, ...list].slice(0, 4));
@@ -151,8 +157,8 @@ async function startSession({ token, user }, pin) {
   state.session = { token, userId: user.id };
   write(K.session, state.session);
   loadAccount(user.id);
-  state.me = user;
-  rememberAccount(user);
+  state.me = tidy(user);
+  rememberAccount(state.me);
   // Local hash so "Require PIN on open" works offline. It's tied to this session's token.
   setPrefs({ pinHash: await sha256(`${token}:${pin}`) });
   persistCache();
@@ -185,7 +191,7 @@ export function signOut({ expired = false } = {}) {
 
 /** Change name and/or username. Needs a connection. */
 export async function updateProfile(patch) {
-  const user = await api.updateProfile(state.session.token, patch);
+  const user = tidy(await api.updateProfile(state.session.token, patch));
   const oldId = state.me?.id;
   state.me = user;
   if (oldId) forgetAccount(oldId);
@@ -205,11 +211,11 @@ export async function changePin(currentPin, newPin) {
 
 // ---------- friends ----------
 
-export const searchUsers = (query) => api.searchUsers(state.session.token, query);
+export const searchUsers = async (query) => (await api.searchUsers(state.session.token, query)).map(tidy);
 
 /** Instant add. Needs a connection. Makes the new friend the current rival. */
 export async function addFriend(userId) {
-  const friend = await api.addFriend(state.session.token, userId);
+  const friend = tidy(await api.addFriend(state.session.token, userId));
   if (!state.friends.some((f) => f.id === friend.id)) state.friends = [...state.friends, friend];
   state.rivalId = friend.id;
   persistCache();
@@ -238,7 +244,17 @@ export async function blockUser(userId) {
 }
 
 export const unblockUser = (userId) => api.unblockUser(state.session.token, userId);
-export const getBlocked = () => api.getBlocked(state.session.token);
+export const getBlocked = async () => (await api.getBlocked(state.session.token)).map(tidy);
+
+/** A friend's (or your own) profile. Needs a connection; the last result per user is kept in memory. */
+const profiles = new Map();
+export const cachedProfile = (userId) => profiles.get(userId) || null;
+export async function getProfile(userId) {
+  const raw = await api.getProfile(state.session.token, userId);
+  const p = { ...raw, user: tidy(raw.user), opponents: raw.opponents.map(tidy) };
+  profiles.set(userId, p);
+  return p;
+}
 
 // ---------- writes (optimistic) ----------
 
@@ -339,7 +355,7 @@ async function syncOnce() {
     await flush();
     const [me, friends, games] = await Promise.all([api.getMe(session.token), api.getFriends(session.token), api.getGames(session.token)]);
     if (state.session !== session) return; // signed out while this was in flight
-    Object.assign(state, { me, friends, serverGames: games, lastSynced: now(), loaded: true });
+    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
     rememberAccount(me);
     rebuild();
     pickRival();

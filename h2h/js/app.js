@@ -2,10 +2,10 @@ import { TEAMS, getTeam, searchTeams } from './teams.js';
 import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
-import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
+import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, changePinFlow } from './lock.js';
-import { icon, logo, esc, haptic, openSheet, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
+import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -51,11 +51,6 @@ function relativeTime(iso) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} hr ago`;
   return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-function greeting() {
-  const h = new Date().getHours();
-  return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
 
 // ---------- navigation ----------
@@ -105,6 +100,7 @@ document.addEventListener('click', (e) => {
   }
   else if (name === 'add-friend') addFriend(id, action);
   else if (name === 'friend-options') openFriendOptions(id);
+  else if (name === 'open-profile') openProfile(id);
   else if (name === 'invite') shareInvite();
 });
 
@@ -171,11 +167,14 @@ const noFriendsState = () => `<div class="empty">
 
 const wlPill = (win) =>
   `<span class="pill ${win ? 'pill--w' : 'pill--l'}" aria-label="${win ? 'Win' : 'Loss'}">${win ? 'W' : 'L'}</span>`;
+const otPill = '<span class="pill pill--ot" aria-label="Overtime">O</span>';
+/** W/L pill, plus an orange O when the game went to overtime. */
+const resultPills = (g) => `<span class="row__pills">${wlPill(g.win)}${g.overtime ? otPill : ''}</span>`;
 
 function gameRow(g) {
   const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
   const byOpp = g.createdBy && g.createdBy !== meId();
-  const meta = [g.overtime && 'OT', g.note].filter(Boolean).join(' · ');
+  const meta = g.note || '';
   const tags = [
     g.pending ? `<span class="tag tag--pending">${icon('clock')}Not synced</span>` : '',
     byOpp ? `<span class="tag">Logged by ${esc(oppName())}</span>` : '',
@@ -196,7 +195,7 @@ function gameRow(g) {
           </span>
           ${meta || tags ? `<span class="row__meta">${tags}${meta ? `<span class="row__note">${esc(meta)}</span>` : ''}</span>` : ''}
         </span>
-        ${wlPill(g.win)}
+        ${resultPills(g)}
       </button>
     </div>
   </li>`;
@@ -221,7 +220,6 @@ const RING_C = 2 * Math.PI * 52;
 
 function renderDashboardHeader() {
   const r = store.rival();
-  $('#dash-eyebrow').textContent = meName() ? `${greeting()}, ${meName()}` : '\u00a0';
   $('#t-dashboard').innerHTML = r
     ? `<button type="button" class="rival-switch" data-action="switch-rival" aria-label="Rivalry with ${esc(r.display_name)}. Switch friend">vs ${esc(r.display_name)}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.75 9.75 5.25 5.25 5.25-5.25"/></svg></button>`
     : 'Dashboard';
@@ -355,18 +353,20 @@ function renderDashboard() {
 
 function clutchTile() {
   const c = clutch(ui.views);
-  const cell = (label, r, hint) => {
+  const cell = (label, r, hint, key) => {
     const n = r.wins + r.losses;
     const cls = !n || r.wins === r.losses ? '' : r.wins > r.losses ? 'is-win' : 'is-loss';
-    return `<div><dt>${label}</dt><dd class="${cls}" aria-label="${n ? winsLosses(r.wins, r.losses) : 'No games'}">${n ? `${r.wins}–${r.losses}` : '—'}</dd><dd class="trio__hint">${n ? `${Math.round((r.wins / n) * 100)}%` : hint}</dd></div>`;
+    return `<div><button type="button" class="stat-link" data-clutch="${key}" aria-label="${label}: ${n ? winsLosses(r.wins, r.losses) : 'no games'}. Show games">
+      <span class="trio__dt">${label}</span><span class="trio__dd ${cls}">${n ? `${r.wins}–${r.losses}` : '—'}</span><span class="trio__hint">${n ? `${Math.round((r.wins / n) * 100)}%` : hint}</span>
+    </button></div>`;
   };
   return `<section class="card tile area-clutch" aria-labelledby="clutch-title">
     <h3 class="tile__title" id="clutch-title">Clutch</h3>
-    <dl class="trio">
-      ${cell(`Close (≤${CLOSE_MARGIN})`, c.close, 'None yet')}
-      ${cell('Overtime', c.overtime, 'None yet')}
-      ${cell(`Blowouts (${BLOWOUT_MARGIN}+)`, c.blowouts, 'None yet')}
-    </dl>
+    <div class="trio">
+      ${cell(`Close (≤${CLOSE_MARGIN})`, c.close, 'None yet', 'close')}
+      ${cell('Overtime', c.overtime, 'None yet', 'overtime')}
+      ${cell(`Blowouts (${BLOWOUT_MARGIN}+)`, c.blowouts, 'None yet', 'blowouts')}
+    </div>
   </section>`;
 }
 
@@ -399,12 +399,12 @@ function renderTeams() {
   const row = (kind, r) => {
     if (!r) return '';
     const t = getTeam(r.abbr);
-    return `<li class="teams__row">
+    return `<li><button type="button" class="stat-link teams__row" data-team-games="${esc(r.abbr)}" data-team-side="${side}" aria-label="${kind === 'best' ? 'Best' : 'Worst'} team: ${esc(t?.name || r.abbr)}, ${winsLosses(r.wins, r.losses)}. Show games">
       <span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>
       ${logo(r.abbr, { size: 'md', alt: '' })}
       <span class="teams__name"><span>${esc(t?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
-      <span class="teams__record" aria-label="${esc(t?.name || r.abbr)}: ${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span>
-    </li>`;
+      <span class="teams__record">${r.wins}–${r.losses}</span>
+    </button></li>`;
   };
   card.innerHTML = `
     <div class="teams__top">
@@ -439,6 +439,47 @@ function renderCalendar() {
   });
 }
 
+// ---------- game-list pop-ups ----------
+
+function gamesPopup(title, subtitle, list) {
+  openPopup({
+    title,
+    subtitle,
+    body: list.length
+      ? `<ul class="list list--games" role="list">${list.map((g) => staticGameRow(g, null, { withMonth: true })).join('')}</ul>`
+      : '<p class="popup__empty">No games yet.</p>',
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const clutchBtn = e.target.closest('[data-clutch]');
+  if (clutchBtn) {
+    const kind = clutchBtn.dataset.clutch;
+    const pick = {
+      close: { title: `Close Games (≤${CLOSE_MARGIN})`, test: (g) => Math.abs(g.margin) <= CLOSE_MARGIN },
+      overtime: { title: 'Overtime Games', test: (g) => g.overtime },
+      blowouts: { title: `Blowouts (${BLOWOUT_MARGIN}+)`, test: (g) => Math.abs(g.margin) >= BLOWOUT_MARGIN },
+    }[kind];
+    const list = ui.views.filter(pick.test);
+    const r = record(list);
+    gamesPopup(pick.title, `vs ${oppName()} · You’re ${r.wins}–${r.losses}`, list);
+    return;
+  }
+  const teamBtn = e.target.closest('[data-team-games]');
+  if (teamBtn) {
+    const abbr = teamBtn.dataset.teamGames;
+    const mine = teamBtn.dataset.teamSide === 'myTeam';
+    const list = ui.views.filter((g) => (mine ? g.myTeam : g.oppTeam) === abbr);
+    const r = record(list);
+    const name = getTeam(abbr)?.name || abbr;
+    gamesPopup(
+      mine ? `You as the ${name}` : `${oppName()} as the ${name}`,
+      mine ? `You’re ${r.wins}–${r.losses} with them` : `${oppName()} is ${r.losses}–${r.wins} with them · you’re ${r.wins}–${r.losses}`,
+      list,
+    );
+  }
+});
+
 // ---------- over-time chart ----------
 
 function renderTrend() {
@@ -448,7 +489,7 @@ function renderTrend() {
     points: timeline(store.pairGames(), meId()),
     metric: ui.trend.metric,
     range: ui.trend.range,
-    opponent: oppName(),
+    opponent: `vs ${oppName()}`,
     onChange: (patch) => {
       Object.assign(ui.trend, patch);
       try {
@@ -734,7 +775,7 @@ function initSwipe() {
   document.addEventListener('pointerdown', (e) => {
     const wrap = e.target.closest('.row-wrap');
     closeOpen(wrap);
-    if (!wrap || e.button !== 0 || e.target.closest('.row-delete')) return;
+    if (!wrap || e.button !== 0 || e.target.closest('.row-delete') || wrap.querySelector('.row--static')) return;
     const row = $('.row', wrap);
     s = { wrap, row, x0: e.clientX, y0: e.clientY, base: wrap.classList.contains('is-open') ? -ACTION_W : 0, x: 0, lock: null, id: e.pointerId, armed: false };
   });
@@ -977,6 +1018,201 @@ function openGameSheet({ id = null } = {}) {
   validate();
 }
 
+// ---------- profiles ----------
+
+/**
+ * Read-only game row. With `opponents` (a Map of users) it also says who the game was against.
+ * `withMonth` shows the month under the day instead of the weekday (for lists that span months).
+ */
+function staticGameRow(g, opponents = null, { withMonth = false } = {}) {
+  const opp = opponents?.get(g.oppId);
+  const oppLabel = opponents ? (g.oppId === meId() ? 'You' : opp?.display_name || 'Unknown') : null;
+  const meta = [oppLabel && `vs ${oppLabel}`, g.note].filter(Boolean).join(' · ');
+  const under = withMonth ? fmt(g.date, { month: 'short' }) : fmt(g.date, { weekday: 'short' });
+  return `<li class="row-wrap"><div class="row-clip"><div class="row row--static" aria-label="${esc(longDate(g.date))}: ${g.myScore} to ${g.oppScore}, ${g.win ? 'win' : 'loss'}${g.overtime ? ' in overtime' : ''}">
+    <span class="row__date"><span class="row__day">${asDate(g.date).getDate()}</span><span class="row__dow">${under}</span></span>
+    <span class="row__main">
+      <span class="row__match">
+        ${logo(g.myTeam, { size: 'sm', alt: getTeam(g.myTeam)?.name })}
+        <span class="row__score"><span class="num num--end ${g.win ? 'is-winner' : ''}">${g.myScore}</span><span class="row__dash">–</span><span class="num ${g.win ? '' : 'is-winner'}">${g.oppScore}</span></span>
+        ${logo(g.oppTeam, { size: 'sm', alt: getTeam(g.oppTeam)?.name })}
+      </span>
+      ${meta ? `<span class="row__meta"><span class="row__note">${esc(meta)}</span></span>` : ''}
+    </span>
+    ${resultPills(g)}
+  </div></div></li>`;
+}
+
+/** Profile sheet: overall stats, win-rate chart, best/worst team, opponents and full game history. */
+function openProfile(userId) {
+  if (document.documentElement.classList.contains('has-modal')) return;
+  const isMe = userId === meId();
+  const friend = isMe ? state.me : state.friends.find((f) => f.id === userId);
+  if (!friend) return;
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  content.innerHTML = `
+    <header class="sheet__header">
+      <span></span>
+      <h2 id="profile-sheet-title" class="sheet__title">${isMe ? 'My Profile' : esc(friend.display_name)}</h2>
+      <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
+    </header>
+    <div class="sheet__body profile">
+      <div class="profile__head">
+        ${avatar(friend, 'xl')}
+        <h3 class="profile__name">${esc(friend.display_name)}</h3>
+        <p class="profile__user">@${esc(friend.username)}</p>
+      </div>
+      <div data-profile-body><p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p></div>
+    </div>`;
+  const body = $('[data-profile-body]', content);
+  const sheet = openSheet({ content, labelledBy: 'profile-sheet-title', large: true });
+  const trend = { metric: 'winPct', range: 'All' };
+  let data = null;
+
+  const paint = () => {
+    const { user, opponents: oppList, games } = data;
+    const opponents = new Map(oppList.map((u) => [u.id, u]));
+    const v = views(games, user.id);
+    const st = computeStats(games, user.id);
+    if (!st.total) {
+      body.innerHTML = `<p class="search-note">${isMe ? 'You haven’t' : `${esc(user.display_name)} hasn’t`} played any games yet.</p>`;
+      return;
+    }
+    const pct = Math.round(st.pct * 100);
+    const teams = teamRecords(v, 'myTeam');
+    const pool = teams.some((r) => r.games >= 2) ? teams.filter((r) => r.games >= 2) : teams;
+    const ranked = pool.slice().sort((a, b) => b.pct - a.pct || b.games - a.games);
+    const best = ranked[0], worst = ranked.length > 1 ? ranked.at(-1) : null;
+    const teamRow = (kind, r) =>
+      r
+        ? `<li class="teams__row"><span class="teams__kind teams__kind--${kind}">${kind === 'best' ? 'Best' : 'Worst'}</span>${logo(r.abbr, { size: 'md', alt: '' })}
+            <span class="teams__name"><span>${esc(getTeam(r.abbr)?.nickname || r.abbr)}</span><span class="teams__meta">${r.games} ${r.games === 1 ? 'game' : 'games'} · ${Math.round(r.pct * 100)}% wins</span></span>
+            <span class="teams__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></li>`
+        : '';
+    const opps = opponentRecords(v);
+    const vsMe = !isMe && opps.find((o) => o.id === meId());
+    const months = new Map();
+    for (const g of v) {
+      const k = g.date.slice(0, 7);
+      if (!months.has(k)) months.set(k, []);
+      months.get(k).push(g);
+    }
+
+    body.innerHTML = `
+      <section class="card hero profile__card" aria-label="Overall record">
+        <div class="hero__top">
+          <div class="ring" role="img" aria-label="Win rate ${pct} percent">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring__track" cx="60" cy="60" r="52"/><circle class="ring__value" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C * (1 - pct / 100)}"/></svg>
+            <span class="ring__label" aria-hidden="true"><span class="ring__pct">${pct}<span class="ring__unit">%</span></span><span class="ring__caption">Win Rate</span></span>
+          </div>
+          <div class="hero__record">
+            <p class="eyebrow">Overall Record</p>
+            <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
+            <p class="hero__sub">${st.total} ${st.total === 1 ? 'game' : 'games'} · ${opps.length} ${opps.length === 1 ? 'opponent' : 'opponents'}</p>
+          </div>
+        </div>
+        <dl class="hero__streaks">
+          <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
+          <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
+          <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
+        </dl>
+      </section>
+
+      ${
+        vsMe
+          ? `<button type="button" class="card profile__vs" data-profile-rivalry>
+              <span class="cell__stack"><span class="tile__title">Against you</span><span class="profile__vs-record">${esc(user.display_name)} is ${vsMe.wins}–${vsMe.losses} vs you</span></span>
+              <span class="link">Open Rivalry</span></button>`
+          : ''
+      }
+
+      <section class="card tile profile__card">
+        <h3 class="tile__title">Scoring</h3>
+        <dl class="trio">
+          <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
+          <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
+          <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card trend profile__card" data-profile-trend aria-labelledby="profile-trend-title"></section>
+
+      <section class="card teams profile__card" aria-labelledby="profile-teams-title">
+        <h3 class="tile__title" id="profile-teams-title">Best &amp; Worst Teams</h3>
+        <ul class="teams__list" role="list">${teamRow('best', best)}${teamRow('worst', worst)}</ul>
+      </section>
+
+      <section class="group" aria-labelledby="profile-opps-title">
+        <div class="group__head"><h2 id="profile-opps-title">Played Against</h2><span class="group__record">${opps.length}</span></div>
+        <ul class="list list--friends list--sheet" role="list">
+          ${opps
+            .map((o) => {
+              const u = o.id === meId() ? state.me : opponents.get(o.id);
+              const cls = o.wins === o.losses ? '' : o.wins > o.losses ? 'is-win' : 'is-loss';
+              const inner = `${avatar(u, 'md')}<span class="cell__stack"><span class="cell__title">${o.id === meId() ? 'You' : esc(u?.display_name || 'Unknown')}</span><span class="cell__sub">${u ? `@${esc(u.username)} · ` : ''}${o.games} ${o.games === 1 ? 'game' : 'games'}</span></span>
+                <span class="friend-row__record ${cls}" aria-label="${winsLosses(o.wins, o.losses)}">${o.wins}–${o.losses}</span>`;
+              return o.id === meId() && !isMe
+                ? `<li><button type="button" class="cell cell--button friend-row" data-profile-rivalry>${inner}</button></li>`
+                : `<li class="cell friend-row">${inner}</li>`;
+            })
+            .join('')}
+        </ul>
+        <p class="group__foot">Records are from ${isMe ? 'your' : `${esc(user.display_name)}’s`} side.</p>
+      </section>
+
+      ${[...months.values()]
+        .map((list, i) => {
+          const r = record(list);
+          return `<section class="group" aria-labelledby="pm-${i}">
+            <div class="group__head"><h2 id="pm-${i}">${monthLabel(list[0].date)}</h2><span class="group__record">${r.wins}–${r.losses}</span></div>
+            <ul class="list list--games list--sheet" role="list">${list.map((g) => staticGameRow(g, opponents)).join('')}</ul>
+          </section>`;
+        })
+        .join('')}`;
+
+    const drawTrend = () =>
+      renderTrendCard($('[data-profile-trend]', body), {
+        points: timeline(games, user.id),
+        metric: trend.metric,
+        range: trend.range,
+        opponent: 'vs everyone',
+        titleId: 'profile-trend-title',
+        onChange: (patch) => (Object.assign(trend, patch), drawTrend()),
+      });
+    drawTrend(); // the sheet is already laid out, so the card has its width
+  };
+
+  const load = async () => {
+    try {
+      data = await store.getProfile(userId);
+      paint();
+    } catch (err) {
+      data = store.cachedProfile(userId);
+      if (data) return paint();
+      body.innerHTML = `<div class="empty empty--compact"><p class="empty__text">${err.code === 'network' ? 'You’re offline. Profiles need a connection.' : esc(err.message)}</p>
+        <button type="button" class="btn btn--tinted" data-profile-retry>Try Again</button></div>`;
+    }
+  };
+  data = store.cachedProfile(userId);
+  if (data) paint();
+  load();
+
+  content.addEventListener('click', (e) => {
+    if (e.target.closest('[data-sheet="done"]')) return sheet.close();
+    if (e.target.closest('[data-profile-retry]')) {
+      body.innerHTML = '<p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p>';
+      return load();
+    }
+    if (e.target.closest('[data-profile-rivalry]')) {
+      e.stopPropagation();
+      store.setRival(userId);
+      sheet.close();
+      show('dashboard');
+    }
+  });
+}
+
 // ---------- opponent picker ----------
 
 /** Pick which friend a new game is against. Resolves the friend, or null if cancelled. */
@@ -1116,14 +1352,15 @@ function friendRecord(friendId) {
   return record(views(store.pairGames(friendId), meId()));
 }
 
-function friendRow(f, { chevron = true, more = false } = {}) {
+function friendRow(f, { chevron = true, more = false, action = 'open-rival' } = {}) {
   const r = friendRecord(f.id);
   const current = f.id === state.rivalId;
-  return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="open-rival" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} Open rivalry">
+  const verb = action === 'open-profile' ? 'Open profile' : 'Open rivalry';
+  return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="${action}" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} ${verb}">
     ${avatar(f, 'md')}
     <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
     <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
-    ${current ? icon('check', 'friend-row__check') : chevron && !more ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
+    ${current && action === 'open-rival' ? icon('check', 'friend-row__check') : chevron && !more ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
   </button>${more ? `<button type="button" class="friend-more" data-action="friend-options" data-id="${esc(f.id)}" aria-label="More options for ${esc(f.display_name)}">${icon('more')}</button>` : ''}</li>`;
 }
 
@@ -1143,10 +1380,15 @@ function renderFriends() {
     return;
   }
   const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
-  el.innerHTML = `<section class="group" aria-labelledby="friends-title">
+  const meRow = state.me
+    ? `<section class="group"><ul class="list list--friends" role="list"><li><button type="button" class="cell cell--button friend-row" data-action="open-profile" data-id="${esc(state.me.id)}" aria-label="My profile: your stats against everyone">
+        ${avatar(state.me, 'md')}<span class="cell__stack"><span class="cell__title">My Profile</span><span class="cell__sub">Your stats against everyone</span></span>
+        <svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button></li></ul></section>`
+    : '';
+  el.innerHTML = `${meRow}<section class="group" aria-labelledby="friends-title">
     <div class="group__head"><h2 id="friends-title">Your Friends</h2><span class="group__record">${sorted.length}</span></div>
-    <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f, { more: true })).join('')}</ul>
-    <p class="group__foot">Tap a friend to open your rivalry. Tap ⋯ to remove or block.</p>
+    <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f, { more: true, action: 'open-profile' })).join('')}</ul>
+    <p class="group__foot">Tap a friend to see their profile and stats. Tap ⋯ to remove or block.</p>
   </section>${invite}`;
 }
 

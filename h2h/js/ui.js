@@ -356,6 +356,42 @@ export function alertDialog({ title, message = '', actions }) {
   });
 }
 
+/**
+ * Pop-up window: a centred card with a title and an × in the top-right, for read-only lists.
+ * Closes on ×, the backdrop, or Escape.
+ */
+export function openPopup({ title, subtitle = '', body }) {
+  current?.dismiss();
+  const root = document.createElement('div');
+  root.className = 'popup-root';
+  root.innerHTML = `<div class="popup-backdrop"></div>
+    <div class="popup" role="dialog" aria-modal="true" aria-labelledby="popup-title">
+      <div class="popup__head">
+        <div class="popup__titles"><h2 id="popup-title" class="popup__title">${esc(title)}</h2>${subtitle ? `<p class="popup__sub">${esc(subtitle)}</p>` : ''}</div>
+        <button type="button" class="popup__close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      </div>
+      <div class="popup__body">${body}</div>
+    </div>`;
+  layer().append(root);
+  let closed = false;
+  const entry = { kind: 'popup', root, dismiss: () => close() };
+  push(entry);
+  root.getBoundingClientRect();
+  root.classList.add('is-open');
+  root.querySelector('.popup__close').focus({ preventScroll: true });
+  async function close() {
+    if (closed) return;
+    closed = true;
+    root.classList.remove('is-open');
+    pop(entry);
+    await afterTransition(root.querySelector('.popup'), 300);
+    root.remove();
+  }
+  root.querySelector('.popup__close').addEventListener('click', close);
+  root.querySelector('.popup-backdrop').addEventListener('click', close);
+  return { close, root };
+}
+
 // ---------- toast ----------
 
 let current = null;

@@ -16,6 +16,7 @@
  *   GET  ?action=search&token=...&q=...        -> users matching a name or username
  *   GET  ?action=games&token=...               -> every non-deleted game you played in
  *   GET  ?action=blocked&token=...             -> users you've blocked
+ *   GET  ?action=profile&token=...&userId=...  -> a friend's (or your own) profile: user, opponents, games
  *   POST { action: 'signUp', username, displayName, pin }  -> { token, user }
  *   POST { action: 'signIn', username, pin }               -> { token, user }
  *   POST { action: 'signOut', token }                      -> {}
@@ -114,6 +115,7 @@ function doGet(e) {
       case 'search': return searchUsers_(me.id, p.q);
       case 'games': return listGames_(me.id);
       case 'blocked': return listBlocked_(me.id);
+      case 'profile': return getProfile_(me, p.userId);
       default: throw apiError_('Unknown action.', 'invalid');
     }
   });
@@ -145,9 +147,14 @@ function doPost(e) {
  * ACCOUNTS & SESSIONS
  * ===================================================================== */
 
+/** "omer lukatz" → "Omer Lukatz": first letter of each word capitalised, the rest left as typed. */
+function niceName_(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').replace(/(^|\s)(\S)/g, function (m, space, ch) { return space + ch.toUpperCase(); });
+}
+
 function signUp_(username, displayName, pin) {
   const name = String(username || '').trim().toLowerCase();
-  const display = String(displayName || '').trim().replace(/\s+/g, ' ');
+  const display = niceName_(displayName);
   if (!/^[a-z0-9_.]{3,20}$/.test(name)) throw apiError_('Usernames are 3–20 letters, numbers, dots or underscores.', 'invalid');
   if (!display || display.length > 24) throw apiError_('Enter a name up to 24 characters.', 'invalid');
   if (!/^\d{4}$/.test(String(pin))) throw apiError_('Your PIN must be 4 digits.', 'invalid');
@@ -210,7 +217,7 @@ function updateProfile_(me, username, displayName) {
       next.username = name;
     }
     if (displayName != null) {
-      const display = String(displayName).trim().replace(/\s+/g, ' ');
+      const display = niceName_(displayName);
       if (!display || display.length > 24) throw apiError_('Enter a name up to 24 characters.', 'invalid');
       next.display_name = display;
       next.initial = display.charAt(0).toUpperCase();
@@ -305,7 +312,8 @@ function hash_(userId, pin) {
  * ===================================================================== */
 
 function publicUser_(u) {
-  return { id: u.id, username: u.username, display_name: u.display_name, color: u.color || '#5856D6', initial: u.initial || String(u.display_name || '?').charAt(0).toUpperCase() };
+  const name = niceName_(u.display_name);
+  return { id: u.id, username: u.username, display_name: name, color: u.color || '#5856D6', initial: String(u.initial || name.charAt(0) || '?').toUpperCase() };
 }
 
 function findUserByUsername_(username) {
@@ -403,6 +411,26 @@ function unblockUser_(me, userId) {
       .forEach(function (r) { sheet.deleteRow(r.row); });
     return {};
   });
+}
+
+/**
+ * A profile: the user, everyone they've played, and all their games. Only you and your friends can
+ * see it (so blocking someone also hides your profile from them).
+ */
+function getProfile_(me, userId) {
+  const id = userId || me.id;
+  if (id !== me.id && friendIds_(me.id).indexOf(id) === -1) throw apiError_('You can only see your friends’ profiles.', 'invalid');
+  const users = readObjects_(sheet_('Users'));
+  const user = users.find(function (u) { return u.id === id; });
+  if (!user) throw apiError_('That user no longer exists.', 'invalid');
+  const games = listGames_(id);
+  const oppIds = {};
+  games.forEach(function (g) { oppIds[g.player1_id === id ? g.player2_id : g.player1_id] = true; });
+  return {
+    user: publicUser_(user),
+    opponents: users.filter(function (u) { return oppIds[u.id]; }).map(publicUser_),
+    games: games,
+  };
 }
 
 /* =====================================================================

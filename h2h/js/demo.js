@@ -48,6 +48,9 @@ function load() {
 const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
 
 
+/** Same as the server: first letter of each word capitalised. */
+const niceName = (name) => String(name || '').trim().replace(/\s+/g, ' ').replace(/(^|\s)(\S)/g, (m, space, ch) => space + ch.toUpperCase());
+
 export const controls = {
   get offline() {
     return localStorage.getItem(OFFLINE_KEY) === '1';
@@ -89,7 +92,7 @@ export function createDemoBackend(ApiError) {
     await delay();
     if (controls.offline || !navigator.onLine) throw new ApiError('You’re offline.', 'network');
   };
-  const pub = ({ id, username, display_name, color, initial }) => ({ id, username, display_name, color, initial });
+  const pub = ({ id, username, display_name, color, initial }) => ({ id, username, display_name: niceName(display_name), color, initial: String(initial || '?').toUpperCase() });
   const me = (s, token) => {
     const user = s.users.find((u) => u.id === s.sessions[token]);
     if (!user) throw new ApiError('Your session has ended. Sign in again.', 'auth');
@@ -110,7 +113,7 @@ export function createDemoBackend(ApiError) {
       await net();
       const s = load();
       const name = String(username || '').trim().toLowerCase();
-      const display = String(displayName || '').trim().replace(/\s+/g, ' ');
+      const display = niceName(displayName);
       if (!/^[a-z0-9_.]{3,20}$/.test(name)) throw new ApiError('Usernames are 3–20 letters, numbers, dots or underscores.', 'invalid');
       if (!display || display.length > 24) throw new ApiError('Enter a name up to 24 characters.', 'invalid');
       if (!/^\d{4}$/.test(String(pin))) throw new ApiError('Your PIN must be 4 digits.', 'invalid');
@@ -171,7 +174,7 @@ export function createDemoBackend(ApiError) {
         user.username = name;
       }
       if (displayName != null) {
-        const display = String(displayName).trim().replace(/\s+/g, ' ');
+        const display = niceName(displayName);
         if (!display || display.length > 24) throw new ApiError('Enter a name up to 24 characters.', 'invalid');
         user.display_name = display;
         user.initial = display[0].toUpperCase();
@@ -276,6 +279,19 @@ export function createDemoBackend(ApiError) {
       const user = me(s, token);
       const ids = (s.blocks || []).filter((b) => b.blocker === user.id).map((b) => b.blocked);
       return s.users.filter((u) => ids.includes(u.id)).map(pub);
+    },
+
+    async getProfile(token, userId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const id = userId || user.id;
+      if (id !== user.id && !friendIds(s, user.id).includes(id)) throw new ApiError('You can only see your friends’ profiles.', 'invalid');
+      const target = s.users.find((u) => u.id === id);
+      if (!target) throw new ApiError('That user no longer exists.', 'invalid');
+      const games = s.games.filter((g) => !g.deleted && (g.player1_id === id || g.player2_id === id));
+      const oppIds = new Set(games.map((g) => (g.player1_id === id ? g.player2_id : g.player1_id)));
+      return { user: pub(target), opponents: s.users.filter((u) => oppIds.has(u.id)).map(pub), games };
     },
 
     async getGames(token) {
