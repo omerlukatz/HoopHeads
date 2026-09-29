@@ -1,0 +1,1095 @@
+import { TEAMS, getTeam, searchTeams } from './teams.js';
+import * as store from './store.js';
+import { state } from './store.js';
+import { isDemo, demoControls } from './api.js';
+import { views, computeStats, record, recentTeams } from './stats.js';
+import { showLock, isLocked, avatar } from './lock.js';
+import { icon, logo, esc, haptic, openSheet, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+const ui = {
+  screen: 'dashboard',
+  shown: {}, // last values rendered on the dashboard, so numbers count from old → new
+  signature: '', // skip re-rendering when nothing changed (most polls return the same data)
+  views: [],
+  stats: { total: 0 },
+  justSaved: false,
+};
+
+const meId = () => state.session?.userId;
+const meName = () => state.me?.display_name || '';
+const oppName = () => store.rival()?.display_name || 'Opponent';
+
+// ---------- formatting ----------
+
+const asDate = (iso) => new Date(`${iso}T12:00:00`);
+const fmt = (iso, opts) => asDate(iso).toLocaleDateString(undefined, opts);
+const shortDate = (iso) => fmt(iso, { month: 'short', day: 'numeric' });
+const longDate = (iso) => fmt(iso, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+const monthLabel = (iso) => fmt(iso, { month: 'long', year: 'numeric' });
+const todayISO = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+function relativeTime(iso) {
+  if (!iso) return 'never';
+  const s = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} hr ago`;
+  return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
+// ---------- navigation ----------
+
+const SCREENS = ['dashboard', 'history', 'friends', 'settings'];
+
+function show(screen) {
+  if (!SCREENS.includes(screen)) screen = 'dashboard';
+  const same = ui.screen === screen;
+  ui.screen = screen;
+  for (const el of $$('.screen')) {
+    const on = el.dataset.screen === screen;
+    el.classList.toggle('is-active', on);
+    el.inert = !on;
+  }
+  for (const el of $$('[data-nav]')) {
+    if (el.dataset.nav === screen) el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
+  }
+  if (location.hash.slice(1) !== screen) history.replaceState(null, '', `#${screen}`);
+  document.title = `${{ dashboard: 'Dashboard', history: 'History', friends: 'Friends', settings: 'Settings' }[screen]} · H2H`;
+  return same;
+}
+
+document.addEventListener('click', (e) => {
+  const nav = e.target.closest('[data-nav]');
+  if (nav) {
+    e.preventDefault();
+    const wasActive = show(nav.dataset.nav);
+    haptic('light');
+    // Tapping the active tab scrolls to top, like iOS
+    if (wasActive) $(`.screen[data-screen="${nav.dataset.nav}"] .scroller`).scrollTo({ top: 0, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    return;
+  }
+  const action = e.target.closest('[data-action]');
+  if (!action) return;
+  const { action: name, id } = action.dataset;
+  if (name === 'log' || name === 'rematch') openGameSheet();
+  else if (name === 'edit') openGameSheet({ id });
+  else if (name === 'delete') removeGame(id);
+  else if (name === 'retry') store.sync();
+  else if (name === 'switch-rival') openRivalSwitcher();
+  else if (name === 'open-rival') {
+    store.setRival(id);
+    show('dashboard');
+    haptic('light');
+  }
+  else if (name === 'add-friend') addFriend(id, action);
+});
+
+// "N" logs a new game on desktop keyboards
+document.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'n' || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (isLocked() || document.documentElement.classList.contains('has-modal') || e.target.closest('input, textarea, [contenteditable]')) return;
+  e.preventDefault();
+  openGameSheet();
+});
+
+// ---------- large title → inline title on scroll ----------
+
+function initNavBars() {
+  for (const screen of $$('.screen')) {
+    const scroller = $('.scroller', screen);
+    const title = $('.large-title', screen);
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const y = scroller.scrollTop;
+      screen.classList.toggle('is-scrolled', y > title.offsetTop + title.offsetHeight - 52);
+      // Large title grows slightly when pulled down (rubber-band), as on iOS
+      title.style.transform = y < 0 ? `scale(${1 + Math.min(-y, 120) / 900})` : '';
+    };
+    scroller.addEventListener('scroll', () => ticking || ((ticking = true), requestAnimationFrame(update)), { passive: true });
+  }
+}
+
+// ---------- sync indicator ----------
+
+function renderSync() {
+  const pending = store.pendingCount();
+  let html = '';
+  if (state.status === 'offline') {
+    html = `<span class="sync sync--offline" role="status">${icon('offline')}<span>${pending ? `Offline · ${pending} pending` : 'Offline'}</span></span>`;
+  } else if (state.status === 'error') {
+    html = `<button type="button" class="sync sync--error" data-action="retry" title="${esc(state.error || '')}">${icon('alert')}<span>Couldn’t sync · Retry</span></button>`;
+  } else if (state.status === 'syncing' && pending) {
+    html = `<span class="sync" role="status"><span class="spinner spinner--sm" aria-hidden="true"></span><span>Saving</span></span>`;
+  } else if (ui.justSaved) {
+    html = `<span class="sync sync--ok" role="status">${icon('check')}<span>Saved</span></span>`;
+  }
+  $$('[data-sync]').forEach((slot) => {
+    if (slot.innerHTML !== html) slot.innerHTML = html;
+  });
+}
+
+// ---------- shared rendering pieces ----------
+
+function emptyState({ iconName, text, button }) {
+  return `<div class="empty">
+    <span class="empty__icon">${icon(iconName)}</span>
+    <p class="empty__text">${esc(text)}</p>
+    <button type="button" class="btn btn--primary" data-action="log">${esc(button)}</button>
+  </div>`;
+}
+
+const noFriendsState = () => `<div class="empty">
+    <span class="empty__icon">${icon('people')}</span>
+    <p class="empty__text">Add a friend to start a rivalry.</p>
+    <button type="button" class="btn btn--primary" data-nav="friends">Find Friends</button>
+  </div>`;
+
+const wlPill = (win) =>
+  `<span class="pill ${win ? 'pill--w' : 'pill--l'}" aria-label="${win ? 'Win' : 'Loss'}">${win ? 'W' : 'L'}</span>`;
+
+function gameRow(g) {
+  const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
+  const byOpp = g.createdBy && g.createdBy !== meId();
+  const meta = [g.overtime && 'OT', g.note].filter(Boolean).join(' · ');
+  const tags = [
+    g.pending ? `<span class="tag tag--pending">${icon('clock')}Not synced</span>` : '',
+    byOpp ? `<span class="tag">Logged by ${esc(oppName())}</span>` : '',
+  ].join('');
+  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${g.win ? 'Win' : 'Loss'}${g.overtime ? ' in overtime' : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}Edit game.`;
+  return `<li class="row-wrap" data-id="${g.id}">
+    <div class="row-clip">
+      <div class="row-actions" aria-hidden="true">
+        <button type="button" class="row-delete" data-action="delete" data-id="${g.id}" tabindex="-1">${icon('trash')}<span>Delete</span></button>
+      </div>
+      <button type="button" class="row" data-action="edit" data-id="${g.id}" aria-label="${esc(label)}">
+        <span class="row__date"><span class="row__day">${asDate(g.date).getDate()}</span><span class="row__dow">${fmt(g.date, { weekday: 'short' })}</span></span>
+        <span class="row__main">
+          <span class="row__match">
+            ${logo(g.myTeam, { size: 'sm', alt: '' })}
+            <span class="row__score"><span class="num num--end ${g.win ? 'is-winner' : ''}">${g.myScore}</span><span class="row__dash">–</span><span class="num ${g.win ? '' : 'is-winner'}">${g.oppScore}</span></span>
+            ${logo(g.oppTeam, { size: 'sm', alt: '' })}
+          </span>
+          ${meta || tags ? `<span class="row__meta">${tags}${meta ? `<span class="row__note">${esc(meta)}</span>` : ''}</span>` : ''}
+        </span>
+        ${wlPill(g.win)}
+      </button>
+    </div>
+  </li>`;
+}
+
+/** First load with nothing cached and no connection: say so instead of an endless skeleton. */
+const loadFailed = () => !state.loaded && (state.status === 'offline' || state.status === 'error');
+const loadError = () => `<div class="empty">
+    <span class="empty__icon">${icon('offline')}</span>
+    <p class="empty__text">Can’t load games right now.</p>
+    <button type="button" class="btn btn--primary" data-action="retry">Try Again</button>
+  </div>`;
+
+const winsLosses = (w, l) => `${w} ${w === 1 ? 'win' : 'wins'}, ${l} ${l === 1 ? 'loss' : 'losses'}`;
+
+const skeletonRows = (n) =>
+  `<ul class="list" role="list" aria-hidden="true">${'<li class="skel-row"><span class="skel skel--date"></span><span class="skel skel--line"></span><span class="skel skel--pill"></span></li>'.repeat(n)}</ul>`;
+
+// ---------- dashboard ----------
+
+const RING_C = 2 * Math.PI * 52;
+
+function renderDashboardHeader() {
+  const r = store.rival();
+  $('#dash-eyebrow').textContent = meName() ? `${greeting()}, ${meName()}` : '\u00a0';
+  $('#t-dashboard').innerHTML = r
+    ? `<button type="button" class="rival-switch" data-action="switch-rival" aria-label="Rivalry with ${esc(r.display_name)}. Switch friend">vs ${esc(r.display_name)}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.75 9.75 5.25 5.25 5.25-5.25"/></svg></button>`
+    : 'Dashboard';
+  $('#dash-navtitle').textContent = r ? `vs ${r.display_name}` : 'Dashboard';
+  $('#history-eyebrow').textContent = r ? `vs ${r.display_name}` : '\u00a0';
+}
+
+function renderDashboard() {
+  renderDashboardHeader();
+  const el = $('#dashboard-content');
+  const s = ui.stats;
+  if (loadFailed()) {
+    el.innerHTML = loadError();
+    return;
+  }
+  if (!state.loaded) {
+    el.innerHTML = `<div class="dash-grid" aria-busy="true" aria-label="Loading">
+      <div class="card skel-card area-hero" style="min-height:212px"></div>
+      <div class="card skel-card area-rematch" style="min-height:72px"></div>
+      <div class="card skel-card area-streak" style="min-height:110px"></div>
+      <div class="card skel-card area-longest" style="min-height:110px"></div>
+      <div class="card skel-card area-scoring" style="min-height:104px"></div></div>`;
+    return;
+  }
+  if (!store.rival()) {
+    el.innerHTML = noFriendsState();
+    ui.shown = {};
+    return;
+  }
+  if (!s.total) {
+    el.innerHTML = emptyState({ iconName: 'basketball', text: `No games against ${oppName()} yet.`, button: 'Log First Game' });
+    ui.shown = {};
+    return;
+  }
+  const prev = ui.shown;
+  const pct = Math.round(s.pct * 100);
+  const num = (key, value, opts = {}) => {
+    const from = prev[key] ?? 0;
+    prev[key] = value;
+    return `<span class="num" data-from="${from}" data-to="${value}"${opts.decimals ? ` data-decimals="${opts.decimals}"` : ''}${opts.signed ? ' data-signed' : ''}>${formatNumber(from, opts)}</span>`;
+  };
+  const opp = esc(oppName());
+  const h2h =
+    s.wins === s.losses
+      ? `You and ${opp} are tied ${s.wins}–${s.losses}`
+      : s.wins > s.losses
+        ? `You lead ${opp} ${s.wins}–${s.losses}`
+        : `${opp} leads you ${s.losses}–${s.wins}`;
+  const last = s.latest;
+  const gameTile = (key, title, g, emptyText) =>
+    g
+      ? `<button type="button" class="card tile tile--game area-${key}" data-action="edit" data-id="${g.id}" aria-label="${title}: ${g.myScore} to ${g.oppScore}, ${shortDate(g.date)}. Edit game.">
+          <span class="tile__title">${title}</span>
+          <span class="mini-match">${logo(g.myTeam, { size: 'sm', alt: '' })}${logo(g.oppTeam, { size: 'sm', alt: '' })}</span>
+          <span class="tile__score"><span class="${g.win ? 'is-win' : 'is-loss'}">${g.myScore}</span><span class="dash">–</span>${g.oppScore}</span>
+          <span class="tile__sub">${g.win ? 'Won' : 'Lost'} by ${Math.abs(g.margin)}${g.overtime ? ' · OT' : ''} · ${shortDate(g.date)}</span>
+        </button>`
+      : `<section class="card tile area-${key}"><h3 class="tile__title">${title}</h3><p class="tile__empty">${emptyText}</p></section>`;
+  const prevRing = prev.ring ?? 0;
+  prev.ring = pct;
+
+  el.innerHTML = `
+  <div class="dash-grid">
+    <section class="card hero area-hero" aria-labelledby="hero-title">
+      <h2 id="hero-title" class="visually-hidden">Your record</h2>
+      <div class="hero__top">
+        <div class="ring" role="img" aria-label="Win rate ${pct} percent">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring__track" cx="60" cy="60" r="52"/>
+            <circle class="ring__value" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C * (1 - prevRing / 100)}" data-offset="${RING_C * (1 - pct / 100)}"/>
+          </svg>
+          <span class="ring__label" aria-hidden="true"><span class="ring__pct">${num('pct', pct)}<span class="ring__unit">%</span></span><span class="ring__caption">Win Rate</span></span>
+        </div>
+        <div class="hero__record">
+          <p class="eyebrow">Your Record</p>
+          <p class="record" aria-label="${winsLosses(s.wins, s.losses)}">${num('wins', s.wins)}<span class="record__dash">–</span>${num('losses', s.losses)}</p>
+          <p class="hero__sub">${h2h}</p>
+        </div>
+      </div>
+      <div class="hero__last5">
+        <span class="hero__label" id="last5-label">Last ${s.last5.length}</span>
+        <span class="pills" role="list" aria-labelledby="last5-label">${s.last5.map((w) => `<span role="listitem">${wlPill(w)}</span>`).join('')}</span>
+      </div>
+    </section>
+
+    <button type="button" class="card rematch area-rematch" data-action="rematch">
+      <span class="rematch__logos">${logo(last.myTeam, { size: 'md', alt: '' })}${logo(last.oppTeam, { size: 'md', alt: '' })}</span>
+      <span class="rematch__text"><span class="rematch__title">Rematch</span><span class="rematch__sub">${getTeam(last.myTeam)?.nickname} vs ${getTeam(last.oppTeam)?.nickname}</span></span>
+      <span class="rematch__icon">${icon('rematch')}</span>
+    </button>
+
+    <section class="card tile area-streak">
+      <h3 class="tile__title">Current Streak</h3>
+      <p class="tile__value ${s.streak.win ? 'is-win' : 'is-loss'}">${s.streak.win ? 'W' : 'L'}${num('streak', s.streak.count)}</p>
+      <p class="tile__sub">${s.streak.count === 1 ? (s.streak.win ? 'You won the last game' : 'You lost the last game') : `${s.streak.count} ${s.streak.win ? 'wins' : 'losses'} in a row`}</p>
+    </section>
+
+    <section class="card tile area-longest">
+      <h3 class="tile__title">Longest Streak</h3>
+      <p class="tile__value is-win">W${num('longest', s.longestWin)}</p>
+      <p class="tile__sub">Longest skid: ${s.longestLoss} ${s.longestLoss === 1 ? 'loss' : 'losses'}</p>
+    </section>
+
+    <section class="card tile area-scoring">
+      <h3 class="tile__title">Scoring</h3>
+      <dl class="trio">
+        <div><dt>Avg Scored</dt><dd>${num('for', s.avgFor, { decimals: 1 })}</dd></div>
+        <div><dt>Avg Allowed</dt><dd>${num('against', s.avgAgainst, { decimals: 1 })}</dd></div>
+        <div><dt>Avg Margin</dt><dd class="${s.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${num('margin', s.avgMargin, { decimals: 1, signed: true })}</dd></div>
+      </dl>
+    </section>
+
+    ${gameTile('blowout', 'Biggest Win', s.biggestWin, 'No wins yet.')}
+    ${gameTile('closest', 'Closest Game', s.closest)}
+
+    <section class="area-recent" aria-labelledby="recent-title">
+      <div class="section-head">
+        <h2 id="recent-title" class="section-title">Recent Games</h2>
+        <a href="#history" class="link" data-nav="history">See All</a>
+      </div>
+      <ul class="list list--games" role="list">${ui.views.slice(0, 3).map(gameRow).join('')}</ul>
+    </section>
+  </div>`;
+
+  animateNumbers(el);
+  const ring = $('.ring__value', el);
+  requestAnimationFrame(() => requestAnimationFrame(() => ring.setAttribute('stroke-dashoffset', ring.dataset.offset)));
+}
+
+// ---------- history ----------
+
+function renderHistory() {
+  const el = $('#history-content');
+  if (loadFailed()) {
+    el.innerHTML = loadError();
+    return;
+  }
+  if (!state.loaded) {
+    el.innerHTML = `<div class="group" aria-busy="true" aria-label="Loading"><div class="group__head"><span class="skel skel--label"></span></div>${skeletonRows(6)}</div>`;
+    return;
+  }
+  if (!store.rival()) {
+    el.innerHTML = noFriendsState();
+    return;
+  }
+  if (!ui.views.length) {
+    el.innerHTML = emptyState({ iconName: 'history', text: `Games against ${oppName()} will appear here.`, button: 'Log a Game' });
+    return;
+  }
+  const months = new Map();
+  for (const g of ui.views) {
+    const key = g.date.slice(0, 7);
+    if (!months.has(key)) months.set(key, []);
+    months.get(key).push(g);
+  }
+  el.innerHTML =
+    [...months.values()]
+      .map((games, i) => {
+        const r = record(games);
+        return `<section class="group" aria-labelledby="month-${i}">
+          <div class="group__head"><h2 id="month-${i}">${monthLabel(games[0].date)}</h2><span class="group__record" aria-label="${winsLosses(r.wins, r.losses)}">${r.wins}–${r.losses}</span></div>
+          <ul class="list list--games" role="list">${games.map(gameRow).join('')}</ul>
+        </section>`;
+      })
+      .join('') +
+    `<p class="list-footer">${ui.views.length} ${ui.views.length === 1 ? 'game' : 'games'} · Swipe left on a game to delete it</p>`;
+}
+
+// ---------- settings ----------
+
+function renderSettings() {
+  const el = $('#settings-content');
+  const me = state.me;
+  const prefs = store.getPrefs();
+  const pending = store.pendingCount();
+  const syncFoot =
+    state.status === 'error'
+      ? `<span class="is-loss">${esc(state.error)}</span>`
+      : state.status === 'offline'
+        ? `You’re offline.${pending ? ` ${pending} ${pending === 1 ? 'change is' : 'changes are'} saved on this device and will sync when you’re back online.` : ''}`
+        : 'Games your friends log show up automatically while the app is open.';
+
+  el.innerHTML = `
+  <section class="group" aria-labelledby="set-account">
+    <div class="group__head"><h2 id="set-account">Account</h2></div>
+    <ul class="list" role="list">
+      <li class="cell cell--profile">${avatar(me, 'md')}<span class="cell__stack"><span class="cell__title">${esc(meName())}</span><span class="cell__sub">@${esc(me?.username || '')} · ${state.friends.length} ${state.friends.length === 1 ? 'friend' : 'friends'}</span></span></li>
+      <li class="cell"><label for="require-pin">Require PIN on Open</label><input type="checkbox" role="switch" class="switch" id="require-pin"${prefs.requirePin ? ' checked' : ''}></li>
+      <li><button type="button" class="cell cell--button cell--destructive" id="signout-btn">Sign Out</button></li>
+    </ul>
+    <p class="group__foot">You stay signed in on this device. Turn on Require PIN to be asked for it each time the app opens.</p>
+  </section>
+
+  <section class="group" aria-labelledby="set-sync">
+    <div class="group__head"><h2 id="set-sync">Sync</h2></div>
+    <ul class="list" role="list">
+      <li><button type="button" class="cell cell--button" id="refresh-btn">${icon('refresh')}<span>Refresh Now</span><span class="cell__value">${state.status === 'syncing' ? 'Syncing…' : `Updated ${relativeTime(state.lastSynced)}`}</span></button></li>
+      ${pending ? `<li class="cell"><span>Waiting to Sync</span><span class="cell__value">${pending} ${pending === 1 ? 'change' : 'changes'}</span></li>` : ''}
+    </ul>
+    <p class="group__foot">${syncFoot}</p>
+  </section>
+
+  <section class="group" aria-labelledby="set-data">
+    <div class="group__head"><h2 id="set-data">Data</h2></div>
+    <ul class="list" role="list">
+      <li><button type="button" class="cell cell--button" id="export-btn"${state.games.length ? '' : ' disabled'}>${icon('export')}<span>Export Games</span></button></li>
+    </ul>
+    <p class="group__foot">Downloads all your games against every friend as JSON, exactly as stored in the Sheet.</p>
+  </section>
+
+  ${
+    isDemo
+      ? `<section class="group" aria-labelledby="set-demo">
+    <div class="group__head"><h2 id="set-demo">Demo Mode</h2></div>
+    <ul class="list" role="list">
+      <li class="cell"><label for="sample-toggle">Sample Data</label><input type="checkbox" role="switch" class="switch" id="sample-toggle"${demoControls.sample ? ' checked' : ''}></li>
+      <li class="cell"><label for="offline-toggle">Simulate Offline</label><input type="checkbox" role="switch" class="switch" id="offline-toggle"${demoControls.offline ? ' checked' : ''}></li>
+    </ul>
+    <p class="group__foot">Demo data lives in this browser only. Sign out to try the other demo accounts. Add your Apps Script URL to config.js to connect the shared Google Sheet (see SETUP.md).</p>
+  </section>`
+      : ''
+  }
+  <p class="group__foot group__foot--center">H2H 2.0 · ${isDemo ? 'Demo mode' : 'Synced with Google Sheets'}</p>`;
+}
+
+function initSettings() {
+  const root = $('#settings-content');
+  root.addEventListener('change', async (e) => {
+    const t = e.target;
+    haptic('light');
+    if (t.id === 'require-pin') store.setPrefs({ requirePin: t.checked });
+    if (t.id === 'sample-toggle') {
+      demoControls.setSample(t.checked);
+      await store.sync();
+      toast(t.checked ? 'Sample games added' : 'Sample games removed');
+    }
+    if (t.id === 'offline-toggle') {
+      demoControls.offline = t.checked;
+      if (t.checked) toast('Offline simulated. New games will queue.');
+      else store.sync();
+    }
+  });
+  root.addEventListener('click', (e) => {
+    const id = e.target.closest('button')?.id;
+    if (id === 'refresh-btn') {
+      haptic('light');
+      store.sync();
+    }
+    if (id === 'export-btn') exportGames();
+    if (id === 'signout-btn') confirmSignOut();
+  });
+}
+
+async function confirmSignOut() {
+  const pending = store.pendingCount();
+  const ok = await alertDialog({
+    title: 'Sign Out?',
+    message: pending
+      ? `${pending} ${pending === 1 ? 'change hasn’t' : 'changes haven’t'} synced yet. They’ll stay on this device and sync after the next sign-in.`
+      : 'You can sign back in with your username and PIN.',
+    actions: [{ label: 'Cancel', value: false, style: 'cancel' }, { label: 'Sign Out', value: true, style: 'destructive' }],
+  });
+  if (ok) store.signOut();
+}
+
+async function exportGames() {
+  const data = {
+    app: 'h2h',
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    exportedBy: state.me,
+    friends: state.friends,
+    games: state.games.map(({ _pending, ...g }) => g),
+  };
+  const name = `h2h-games-${todayISO()}.json`;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const file = new File([blob], name, { type: 'application/json' });
+  if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'H2H games' });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+  }
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Exported ${data.games.length} games`);
+}
+
+// ---------- delete with undo ----------
+
+async function removeGame(id) {
+  haptic('medium');
+  const rows = $$(`.row-wrap[data-id="${id}"]`);
+  rows.forEach((r) => r.classList.add('is-leaving'));
+  if (!reducedMotion.matches && rows.length) await new Promise((r) => setTimeout(r, 320));
+  const game = store.deleteGame(id);
+  if (game) toast('Game deleted', { action: { label: 'Undo', onClick: () => store.restoreGame(game) } });
+}
+
+// ---------- swipe to delete ----------
+
+/** A drag shouldn't also count as a tap. */
+function swallowClick(el) {
+  const block = (ev) => (ev.stopPropagation(), ev.preventDefault());
+  el.addEventListener('click', block, { capture: true, once: true });
+  setTimeout(() => el.removeEventListener('click', block, { capture: true }), 60);
+}
+
+const ACTION_W = 88;
+function initSwipe() {
+  let s = null;
+  const closeOpen = (except) =>
+    $$('.row-wrap.is-open').forEach((w) => {
+      if (w === except) return;
+      w.classList.remove('is-open');
+      $('.row', w).style.transform = '';
+      w.style.removeProperty('--reveal');
+    });
+
+  document.addEventListener('pointerdown', (e) => {
+    const wrap = e.target.closest('.row-wrap');
+    closeOpen(wrap);
+    if (!wrap || e.button !== 0 || e.target.closest('.row-delete')) return;
+    const row = $('.row', wrap);
+    s = { wrap, row, x0: e.clientX, y0: e.clientY, base: wrap.classList.contains('is-open') ? -ACTION_W : 0, x: 0, lock: null, id: e.pointerId, armed: false };
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x0, dy = e.clientY - s.y0;
+    if (!s.lock) {
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+        s.lock = 'x';
+        s.row.setPointerCapture(e.pointerId);
+        s.wrap.classList.add('is-dragging');
+      } else if (Math.abs(dy) > 8) {
+        s = null;
+        return;
+      } else return;
+    }
+    let x = s.base + dx;
+    if (x > 0) x /= 5; // resist swiping right
+    s.x = x;
+    s.row.style.transform = `translate3d(${x}px,0,0)`;
+    s.wrap.style.setProperty('--reveal', `${Math.max(0, -x)}px`);
+    const armed = -x > s.wrap.offsetWidth * 0.55;
+    if (armed !== s.armed) {
+      s.armed = armed;
+      s.wrap.classList.toggle('is-armed', armed);
+      if (armed) haptic('medium');
+    }
+  });
+
+  const finish = (e) => {
+    if (!s || e.pointerId !== s.id) return;
+    const { wrap, row, lock, x, armed } = s;
+    s = null;
+    if (lock !== 'x') return;
+    wrap.classList.remove('is-dragging', 'is-armed');
+    swallowClick(row);
+    if (armed) {
+      row.style.transform = `translate3d(${-wrap.offsetWidth}px,0,0)`;
+      wrap.style.setProperty('--reveal', `${wrap.offsetWidth}px`);
+      removeGame(wrap.dataset.id);
+    } else if (-x > ACTION_W / 2) {
+      wrap.classList.add('is-open');
+      row.style.transform = `translate3d(${-ACTION_W}px,0,0)`;
+      wrap.style.setProperty('--reveal', `${ACTION_W}px`);
+      haptic('light');
+    } else {
+      wrap.classList.remove('is-open');
+      row.style.transform = '';
+      wrap.style.removeProperty('--reveal');
+    }
+  };
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+}
+
+// ---------- game sheet ----------
+
+function teamTile(side, abbr) {
+  const team = getTeam(abbr);
+  const who = side === 'myTeam' ? 'Your team' : `${oppName()}’s team`;
+  return `<button type="button" class="team-tile${team ? '' : ' is-empty'}" data-pick="${side}" aria-label="${esc(who)}: ${team ? esc(team.name) : 'none chosen'}. Change team">
+    ${team ? logo(abbr, { size: 'xl', alt: '' }) : `<span class="team-tile__placeholder">${icon('log')}</span>`}
+    <span class="team-tile__name">${team ? esc(team.nickname) : 'Choose Team'}</span>
+  </button>`;
+}
+
+/** `id` edits an existing game; otherwise a new game pre-filled with the last matchup. */
+function openGameSheet({ id = null } = {}) {
+  if (document.documentElement.classList.contains('has-modal') || !state.session || isLocked()) return;
+  if (!store.rival()) {
+    toast('Add a friend first, then log your games against them.');
+    show('friends');
+    return;
+  }
+  const source = id ? state.games.find((g) => g.id === id) : null;
+  if (id && !source) return;
+  const editing = Boolean(source);
+  const view = ui.views.find((g) => g.id === id);
+  const last = ui.views[0];
+  const draft = editing
+    ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note }
+    : { date: todayISO(), myTeam: last?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '' };
+  const opp = oppName();
+
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  content.innerHTML = `
+    <header class="sheet__header">
+      <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
+      <h2 id="game-sheet-title" class="sheet__title">${editing ? 'Edit Game' : 'New Game'}</h2>
+      <button type="submit" form="game-form" class="btn-text btn-text--strong" data-sheet="save" disabled>Save</button>
+    </header>
+    <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
+      <div class="matchup">
+        <div class="side">
+          <span class="side__name">You</span>
+          <div class="side__tile" data-slot="myTeam">${teamTile('myTeam', draft.myTeam)}</div>
+          <input class="score-input" id="score-me" name="myScore" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="next" placeholder="0" aria-label="Your score" value="${draft.myScore}">
+        </div>
+        <span class="matchup__vs" aria-hidden="true">VS</span>
+        <div class="side">
+          <span class="side__name">${esc(opp)}</span>
+          <div class="side__tile" data-slot="oppTeam">${teamTile('oppTeam', draft.oppTeam)}</div>
+          <input class="score-input" id="score-opp" name="oppScore" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="done" placeholder="0" aria-label="${esc(opp)}’s score" value="${draft.oppScore}">
+        </div>
+      </div>
+      <p class="form-hint" role="status" aria-live="polite"></p>
+
+      <ul class="list list--form" role="list">
+        <li class="cell"><label for="g-date">Date</label><input type="date" id="g-date" name="date" class="date-input" value="${draft.date}" max="${todayISO()}" required></li>
+        <li class="cell"><label for="g-ot">Overtime</label><input type="checkbox" role="switch" class="switch" id="g-ot" name="overtime"${draft.overtime ? ' checked' : ''}></li>
+        <li class="cell"><label for="g-note" class="visually-hidden">Note</label><input id="g-note" name="note" class="cell__input cell__input--full" placeholder="Note (optional)" maxlength="80" value="${esc(draft.note)}" enterkeyhint="done"></li>
+      </ul>
+
+      <button type="submit" class="btn btn--primary btn--block" data-sheet="save" disabled>${editing ? 'Save Changes' : 'Save Game'}</button>
+      ${editing ? `<button type="button" class="btn btn--plain-destructive btn--block" data-sheet="delete">Delete Game</button>` : ''}
+    </form>`;
+
+  const form = $('form', content);
+  const hint = $('.form-hint', content);
+  const saveBtns = $$('[data-sheet="save"]', content);
+
+  const read = () => ({
+    ...draft,
+    myScore: form.myScore.value,
+    oppScore: form.oppScore.value,
+    date: form.date.value,
+    overtime: form.overtime.checked,
+    note: form.note.value.trim(),
+  });
+
+  const validate = () => {
+    const d = read();
+    const filled = d.myScore !== '' && d.oppScore !== '';
+    const tie = filled && +d.myScore === +d.oppScore;
+    const ok = filled && !tie && d.myTeam && d.oppTeam && d.date;
+    hint.textContent = tie ? 'Basketball has no ties. Someone has to win.' : '';
+    saveBtns.forEach((b) => (b.disabled = !ok));
+    return ok;
+  };
+
+  for (const input of $$('.score-input', content)) {
+    input.addEventListener('input', () => {
+      input.value = input.value.replace(/\D/g, '').slice(0, 3);
+      validate();
+    });
+    input.addEventListener('focus', () => input.select());
+  }
+  form.myScore.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), form.oppScore.focus()));
+  form.addEventListener('input', validate);
+  form.addEventListener('change', validate);
+
+  const sheet = openSheet({ content, labelledBy: 'game-sheet-title', initialFocus: '#score-me' });
+
+  content.addEventListener('click', async (e) => {
+    const pick = e.target.closest('[data-pick]');
+    if (pick) {
+      const side = pick.dataset.pick;
+      const chosen = await openTeamPicker(side, draft[side]);
+      if (!chosen) return;
+      draft[side] = chosen;
+      const slot = $(`[data-slot="${side}"]`, content);
+      slot.innerHTML = teamTile(side, chosen);
+      const tile = $('.team-tile', slot);
+      tile.classList.add('is-popping');
+      tile.addEventListener('animationend', () => tile.classList.remove('is-popping'), { once: true });
+      tile.focus({ preventScroll: true });
+      validate();
+      return;
+    }
+    const act = e.target.closest('[data-sheet]')?.dataset.sheet;
+    if (act === 'cancel') sheet.close();
+    if (act === 'delete') {
+      sheet.close();
+      removeGame(source.id);
+    }
+  });
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!validate()) {
+      haptic('warning');
+      return;
+    }
+    const d = read();
+    // Back from "me vs opponent" to the neutral player1/player2 shape.
+    // Edits keep the game's original orientation; new games put the logger in player1.
+    const mine = editing && source.player2_id === meId() ? 2 : 1;
+    const theirs = mine === 1 ? 2 : 1;
+    const neutral = {
+      date: d.date,
+      overtime: d.overtime,
+      note: d.note,
+      [`player${mine}_id`]: meId(),
+      [`player${theirs}_id`]: store.rival().id,
+      [`player${mine}_score`]: Number(d.myScore),
+      [`player${theirs}_score`]: Number(d.oppScore),
+      [`player${mine}_team`]: d.myTeam,
+      [`player${theirs}_team`]: d.oppTeam,
+    };
+    if (editing) store.updateGame({ ...neutral, id: source.id });
+    else store.addGame(neutral);
+    haptic('success');
+    sheet.close();
+  });
+
+  validate();
+}
+
+// ---------- team picker ----------
+
+function openTeamPicker(side, current) {
+  return new Promise((resolve) => {
+    const whose = side === 'myTeam' ? 'You' : oppName();
+    const recent = recentTeams(ui.views, side, 5);
+    const cell = (team, lazy) => {
+      const selected = team.abbr === current;
+      return `<button type="button" class="team-cell${selected ? ' is-selected' : ''}" data-abbr="${team.abbr}" aria-label="${esc(team.name)}"${selected ? ' aria-current="true"' : ''}>
+        ${logo(team.abbr, { size: 'md', alt: '', lazy })}<span class="team-cell__abbr">${team.abbr}</span></button>`;
+    };
+
+    const content = document.createElement('div');
+    content.className = 'sheet__content';
+    content.innerHTML = `
+      <header class="sheet__header">
+        <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
+        <div class="sheet__title-group"><h2 id="picker-title" class="sheet__title">Choose Team</h2><p class="sheet__subtitle">${esc(whose)}</p></div>
+        <span></span>
+      </header>
+      <div class="sheet__body picker">
+        <div class="search">
+          ${icon('search')}
+          <input type="search" id="team-search" placeholder="Search teams" aria-label="Search teams by city, name, or abbreviation" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+          <button type="button" class="search__clear" aria-label="Clear search" hidden>${icon('clear')}</button>
+        </div>
+        ${recent.length ? `<section class="picker__section" data-recent aria-labelledby="recent-teams"><h3 class="picker__label" id="recent-teams">Recent</h3><div class="team-grid">${recent.map((a) => cell(getTeam(a), false)).join('')}</div></section>` : ''}
+        <section class="picker__section" aria-labelledby="all-teams">
+          <h3 class="picker__label" id="all-teams">All Teams</h3>
+          <div class="team-grid" data-grid>${TEAMS.map((t) => cell(t, true)).join('')}</div>
+          <p class="picker__empty" hidden></p>
+        </section>
+      </div>`;
+
+    let chosen = null;
+    const sheet = openSheet({ content, labelledBy: 'picker-title', large: true, initialFocus: '#team-search', onClose: () => resolve(chosen) });
+
+    const search = $('#team-search', content);
+    const clear = $('.search__clear', content);
+    const grid = $('[data-grid]', content);
+    const empty = $('.picker__empty', content);
+    const recentSection = $('[data-recent]', content);
+
+    const filter = () => {
+      const q = search.value;
+      const matches = searchTeams(q);
+      const order = new Map(matches.map((t, i) => [t.abbr, i]));
+      for (const btn of grid.children) {
+        const i = order.get(btn.dataset.abbr);
+        btn.hidden = i === undefined;
+        btn.style.order = i ?? 0;
+      }
+      clear.hidden = !q;
+      if (recentSection) recentSection.hidden = Boolean(q.trim());
+      empty.hidden = matches.length > 0;
+      empty.textContent = matches.length ? '' : `No teams match “${q.trim()}”`;
+    };
+    search.addEventListener('input', filter);
+    search.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = [...grid.children].filter((b) => !b.hidden).sort((a, b) => a.style.order - b.style.order)[0];
+      first?.click();
+    });
+    clear.addEventListener('click', () => {
+      search.value = '';
+      filter();
+      search.focus();
+    });
+
+    content.addEventListener('click', (e) => {
+      const btn = e.target.closest('.team-cell');
+      if (btn) {
+        chosen = btn.dataset.abbr;
+        haptic('light');
+        sheet.close();
+      } else if (e.target.closest('[data-sheet="cancel"]')) sheet.close();
+    });
+  });
+}
+
+// ---------- sidebar profile ----------
+
+function renderSidebarProfile() {
+  const me = state.me;
+  $('#sidebar-profile').innerHTML = me
+    ? `${avatar(me, 'sm')}<span class="sidebar__who"><span class="sidebar__name">${esc(me.display_name)}</span><span class="sidebar__vs">@${esc(me.username)}</span></span>`
+    : '';
+}
+
+// ---------- friends ----------
+
+function friendRecord(friendId) {
+  return record(views(store.pairGames(friendId), meId()));
+}
+
+function friendRow(f, { chevron = true } = {}) {
+  const r = friendRecord(f.id);
+  const current = f.id === state.rivalId;
+  return `<li><button type="button" class="cell cell--button friend-row" data-action="open-rival" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${winsLosses(r.wins, r.losses)}.${current ? ' Current rivalry.' : ''} Open rivalry">
+    ${avatar(f, 'md')}
+    <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
+    <span class="friend-row__record ${r.wins + r.losses ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${r.wins + r.losses ? `${r.wins}–${r.losses}` : 'New'}</span>
+    ${current ? icon('check', 'friend-row__check') : chevron ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
+  </button></li>`;
+}
+
+function renderFriends() {
+  const el = $('#friends-list');
+  if (!el || ui.searching) return;
+  if (!state.friends.length) {
+    el.innerHTML = `<div class="empty empty--compact">
+      <span class="empty__icon">${icon('people')}</span>
+      <p class="empty__text">Search by name or username to add your first friend.</p>
+    </div>`;
+    return;
+  }
+  const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
+  el.innerHTML = `<section class="group" aria-labelledby="friends-title">
+    <div class="group__head"><h2 id="friends-title">Your Friends</h2><span class="group__record">${sorted.length}</span></div>
+    <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f)).join('')}</ul>
+    <p class="group__foot">Tap a friend to open your rivalry.</p>
+  </section>`;
+}
+
+function searchRow(u) {
+  return `<li class="cell friend-result">
+    ${avatar(u, 'md')}
+    <span class="cell__stack"><span class="cell__title">${esc(u.display_name)}</span><span class="cell__sub">@${esc(u.username)}</span></span>
+    ${
+      u.isFriend
+        ? `<button type="button" class="chip chip--done" data-action="open-rival" data-id="${esc(u.id)}" aria-label="Already friends with ${esc(u.display_name)}. Open rivalry">${icon('check')}Friends</button>`
+        : `<button type="button" class="chip" data-action="add-friend" data-id="${esc(u.id)}" aria-label="Add ${esc(u.display_name)} as a friend">Add</button>`
+    }
+  </li>`;
+}
+
+function initFriends() {
+  const input = $('#friend-search');
+  const clear = $('#friend-search-clear');
+  const results = $('#friend-results');
+  let timer, seq = 0;
+
+  const run = async () => {
+    const q = input.value.trim();
+    clear.hidden = !q;
+    ui.searching = q.length > 0;
+    $('#friends-list').hidden = ui.searching;
+    if (!ui.searching) {
+      results.innerHTML = '';
+      renderFriends();
+      return;
+    }
+    if (q.replace(/^@/, '').length < 2) {
+      results.innerHTML = '<p class="search-note">Keep typing…</p>';
+      return;
+    }
+    const mine = ++seq;
+    results.innerHTML = '<p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Searching…</p>';
+    try {
+      const users = await store.searchUsers(q);
+      if (mine !== seq) return;
+      results.innerHTML = users.length
+        ? `<section class="group" aria-label="Search results"><div class="group__head"><h2>People</h2></div><ul class="list list--friends" role="list">${users.map(searchRow).join('')}</ul></section>`
+        : `<p class="search-note">No one found for “${esc(q)}”.</p>`;
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = `<p class="search-note">${err.code === 'network' ? 'You’re offline. Search needs a connection.' : esc(err.message)}</p>`;
+    }
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(run, 280);
+  });
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), clearTimeout(timer), run()));
+  clear.addEventListener('click', () => {
+    input.value = '';
+    run();
+    input.focus();
+  });
+  ui.resetSearch = () => {
+    input.value = '';
+    run();
+  };
+}
+
+async function addFriend(userId, button) {
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner spinner--sm" aria-hidden="true"></span>';
+  }
+  try {
+    const friend = await store.addFriend(userId);
+    haptic('success');
+    toast(`You and ${friend.display_name} are now friends`);
+    ui.resetSearch?.();
+    show('dashboard');
+  } catch (err) {
+    haptic('warning');
+    toast(err.code === 'network' ? 'You’re offline. Adding friends needs a connection.' : err.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Add';
+    }
+  }
+}
+
+function openRivalSwitcher() {
+  if (document.documentElement.classList.contains('has-modal')) return;
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
+  content.innerHTML = `
+    <header class="sheet__header">
+      <span></span>
+      <h2 id="rival-title" class="sheet__title">Rivalries</h2>
+      <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
+    </header>
+    <div class="sheet__body">
+      <ul class="list list--friends list--sheet" role="list">${sorted.map((f) => friendRow(f, { chevron: false })).join('')}</ul>
+      <ul class="list list--sheet" role="list" style="margin-top:16px">
+        <li><button type="button" class="cell cell--button" data-sheet="find">${icon('people')}<span>Find Friends</span></button></li>
+      </ul>
+    </div>`;
+  const sheet = openSheet({ content, labelledBy: 'rival-title' });
+  content.addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-action="open-rival"]');
+    if (pick) {
+      e.stopPropagation();
+      store.setRival(pick.dataset.id);
+      haptic('light');
+      sheet.close();
+      return;
+    }
+    const act = e.target.closest('[data-sheet]')?.dataset.sheet;
+    if (act === 'done') sheet.close();
+    if (act === 'find') {
+      sheet.close();
+      show('friends');
+      setTimeout(() => $('#friend-search').focus(), 350);
+    }
+  });
+}
+
+// ---------- data flow ----------
+
+function render(detail = {}) {
+  if (!state.session) return;
+  const pair = store.pairGames();
+  ui.views = views(pair, meId());
+  ui.stats = computeStats(pair, meId());
+  renderSync();
+  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId()]);
+  if (sig !== ui.signature) {
+    ui.signature = sig;
+    renderDashboard();
+    renderHistory();
+    renderFriends();
+    renderSidebarProfile();
+  }
+  // Don't rebuild Settings under the user's finger unless sync state changed
+  if (!$('#settings-content').contains(document.activeElement) || detail.status || detail.synced) renderSettings();
+  if (detail.added) {
+    for (const row of $$(`.row-wrap[data-id="${detail.added}"]`)) {
+      row.classList.add('is-entering');
+      row.getBoundingClientRect();
+      requestAnimationFrame(() => row.classList.remove('is-entering'));
+    }
+  }
+  $$('.content').forEach((c) => c.classList.add('is-ready'));
+}
+
+let savedTimer;
+function onStoreChange(detail) {
+  if (detail.session) {
+    ui.shown = {};
+    ui.signature = '';
+    if (!state.session) {
+      closeModals();
+      ui.resetSearch?.();
+      lockAndStart(detail.expired ? 'Your session ended. Sign in again.' : '');
+    }
+    return;
+  }
+  if (detail.rival) ui.shown = {}; // new rivalry: count up from zero again
+  if (detail.saved) {
+    ui.justSaved = true;
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => ((ui.justSaved = false), renderSync()), 1600);
+  }
+  if (detail.rejected) toast(`Couldn’t save: ${detail.rejected}`);
+  render(detail);
+}
+
+function closeModals() {
+  $$('#layer > *').forEach((el) => el.remove());
+  document.documentElement.classList.remove('has-modal');
+  $('#app').inert = false;
+}
+
+async function lockAndStart(message = '') {
+  await showLock({ message });
+  afterUnlock();
+}
+
+function afterUnlock() {
+  show(ui.screen);
+  render();
+  store.startAutoSync();
+}
+
+// Re-lock after 5+ minutes in the background when "Require PIN on open" is on
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+  else if (hiddenAt && state.session && store.getPrefs().requirePin && !isLocked() && Date.now() - hiddenAt > 5 * 60 * 1000) {
+    closeModals();
+    await showLock({ local: true });
+  }
+});
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  const register = () => navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
+}
+
+async function init() {
+  registerServiceWorker(); // before any await: the lock screen can wait indefinitely
+  initNavBars();
+  initSwipe();
+  initSettings();
+  initFriends();
+  show(location.hash.slice(1) || 'dashboard');
+  store.subscribe(onStoreChange);
+  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  setInterval(() => ui.screen === 'settings' && state.session && !$('#settings-content').contains(document.activeElement) && renderSettings(), 30000); // keeps "Updated x min ago" fresh
+
+  if (!state.session) {
+    await lockAndStart();
+  } else {
+    render(); // instant from cache, before the network answers
+    if (store.getPrefs().requirePin) await showLock({ local: true });
+    afterUnlock();
+  }
+
+}
+
+init();

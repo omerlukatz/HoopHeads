@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>H2H</title>
+  <meta name="description" content="Head-to-head NBA 2K record tracker.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="H2H">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <!-- Paint the right background before the stylesheet arrives: no flash of the wrong theme -->
+  <style>html{background:#F2F2F7}@media (prefers-color-scheme:dark){html{background:#000}}</style>
+  <!-- Decide before first paint whether the lock screen shows, so the app never flashes behind it -->
+  <script>
+    (function () {
+      var session = false, pin = false;
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k.indexOf('h2h.session.v3.') === 0 && localStorage.getItem(k) !== 'null') session = true;
+          if (k.indexOf('h2h.prefs.v3.') === 0 && /"requirePin":true/.test(localStorage.getItem(k))) pin = true;
+        }
+      } catch (e) {}
+      if (!session || pin) document.documentElement.classList.add('boot-locked');
+    })();
+  </script>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="modulepreload" href="js/ui.js">
+  <link rel="modulepreload" href="js/store.js">
+  <link rel="modulepreload" href="js/api.js">
+  <link rel="modulepreload" href="js/lock.js">
+  <link rel="modulepreload" href="js/teams.js">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3.75" y="3.75" width="6.5" height="6.5" rx="1.75"/><rect x="13.75" y="3.75" width="6.5" height="6.5" rx="1.75"/><rect x="3.75" y="13.75" width="6.5" height="6.5" rx="1.75"/><rect x="13.75" y="13.75" width="6.5" height="6.5" rx="1.75"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.75"/><path d="M12 8v8M8 12h8"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.75"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.25"/><path d="M3.25 19.25c.6-3.1 2.9-5 5.75-5s5.15 1.9 5.75 5"/><circle cx="16.75" cy="9.25" r="2.5"/><path d="M15.5 14.4c.4-.1.8-.15 1.25-.15 2.2 0 3.95 1.5 4.5 4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2.75h-.44a1.75 1.75 0 0 0-1.75 1.75v.16a1.75 1.75 0 0 1-.88 1.51l-.38.22a1.75 1.75 0 0 1-1.75 0l-.13-.07a1.75 1.75 0 0 0-2.39.64l-.22.38a1.75 1.75 0 0 0 .64 2.39l.13.09a1.75 1.75 0 0 1 .88 1.5v.45a1.75 1.75 0 0 1-.88 1.52l-.13.08a1.75 1.75 0 0 0-.64 2.39l.22.38a1.75 1.75 0 0 0 2.39.64l.13-.07a1.75 1.75 0 0 1 1.75 0l.38.22a1.75 1.75 0 0 1 .88 1.51v.16a1.75 1.75 0 0 0 1.75 1.75h.44a1.75 1.75 0 0 0 1.75-1.75v-.16a1.75 1.75 0 0 1 .88-1.51l.38-.22a1.75 1.75 0 0 1 1.75 0l.13.07a1.75 1.75 0 0 0 2.39-.64l.22-.39a1.75 1.75 0 0 0-.64-2.39l-.13-.07a1.75 1.75 0 0 1-.88-1.52v-.44a1.75 1.75 0 0 1 .88-1.52l.13-.08a1.75 1.75 0 0 0 .64-2.39l-.22-.38a1.75 1.75 0 0 0-2.39-.64l-.13.07a1.75 1.75 0 0 1-1.75 0l-.38-.22a1.75 1.75 0 0 1-.88-1.51V4.5a1.75 1.75 0 0 0-1.75-1.75z"/><circle cx="12" cy="12" r="2.75"/></symbol>
+  </svg>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="app" id="app">
+    <aside class="sidebar" aria-label="Sidebar">
+      <div class="sidebar__brand">
+        <img src="assets/icons/icon-192.png" alt="" width="32" height="32">
+        <span>H2H</span>
+      </div>
+      <button type="button" class="btn btn--primary btn--block sidebar__log" data-action="log">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+        Log Game
+      </button>
+      <nav aria-label="Primary">
+        <ul class="sidebar__nav" role="list">
+          <li><a href="#dashboard" data-nav="dashboard"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dashboard"/></svg>Dashboard</a></li>
+          <li><a href="#history" data-nav="history"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history"/></svg>History</a></li>
+          <li><a href="#friends" data-nav="friends"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg>Friends</a></li>
+          <li><a href="#settings" data-nav="settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-settings"/></svg>Settings</a></li>
+        </ul>
+      </nav>
+      <div class="sidebar__profile" id="sidebar-profile"></div>
+    </aside>
+
+    <main class="stage" id="main">
+      <section class="screen is-active" data-screen="dashboard" aria-labelledby="t-dashboard">
+        <header class="navbar"><span class="navbar__title" aria-hidden="true" id="dash-navtitle">Dashboard</span><span class="navbar__trailing" data-sync></span></header>
+        <div class="scroller">
+          <p class="title-eyebrow" id="dash-eyebrow">&nbsp;</p>
+          <h1 class="large-title large-title--tight" id="t-dashboard">&nbsp;</h1>
+          <div class="content content--wide" id="dashboard-content"></div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="history" aria-labelledby="t-history" inert>
+        <header class="navbar"><span class="navbar__title" aria-hidden="true">History</span><span class="navbar__trailing" data-sync></span></header>
+        <div class="scroller">
+          <p class="title-eyebrow" id="history-eyebrow">&nbsp;</p>
+          <h1 class="large-title large-title--tight" id="t-history">History</h1>
+          <div class="content" id="history-content"></div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="friends" aria-labelledby="t-friends" inert>
+        <header class="navbar"><span class="navbar__title" aria-hidden="true">Friends</span><span class="navbar__trailing" data-sync></span></header>
+        <div class="scroller">
+          <h1 class="large-title" id="t-friends">Friends</h1>
+          <div class="content" id="friends-content">
+            <div class="search friend-search" role="search">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.75" cy="10.75" r="6.25"/><path d="m15.5 15.5 4.75 4.75"/></svg>
+              <input type="search" id="friend-search" placeholder="Search by name or @username" aria-label="Search people by name or username" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="search">
+              <button type="button" class="search__clear" id="friend-search-clear" aria-label="Clear search" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="m9.25 9.25 5.5 5.5m0-5.5-5.5 5.5" stroke="var(--icon-knockout)" stroke-width="1.75"/></svg></button>
+            </div>
+            <div id="friend-results" aria-live="polite"></div>
+            <div id="friends-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="settings" aria-labelledby="t-settings" inert>
+        <header class="navbar"><span class="navbar__title" aria-hidden="true">Settings</span><span class="navbar__trailing" data-sync></span></header>
+        <div class="scroller">
+          <h1 class="large-title" id="t-settings">Settings</h1>
+          <div class="content" id="settings-content"></div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="Tabs">
+      <a href="#dashboard" class="tab" data-nav="dashboard">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dashboard"/></svg>
+        <span>Dashboard</span>
+      </a>
+      <button type="button" class="tab" data-action="log">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-log"/></svg>
+        <span>Log</span>
+      </button>
+      <a href="#history" class="tab" data-nav="history">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history"/></svg>
+        <span>History</span>
+      </a>
+      <a href="#friends" class="tab" data-nav="friends">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg>
+        <span>Friends</span>
+      </a>
+      <a href="#settings" class="tab" data-nav="settings">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-settings"/></svg>
+        <span>Settings</span>
+      </a>
+    </nav>
+  </div>
+
+  <div id="layer"></div>
+  <div id="lock" class="lock" role="dialog" aria-modal="true" aria-label="Sign in"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
