@@ -30,6 +30,10 @@
         }
       } catch (e) {}
       if (!session || pin) document.documentElement.classList.add('boot-locked');
+      try {
+        var accent = localStorage.getItem('h2h.accent');
+        if (accent) document.documentElement.setAttribute('data-accent', accent);
+      } catch (e) {}
     })();
   </script>
   <link rel="stylesheet" href="css/tokens.css">

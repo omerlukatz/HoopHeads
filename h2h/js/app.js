@@ -268,12 +268,12 @@ function renderDashboard() {
         : `${opp} leads you ${s.losses}–${s.wins}`;
   const gameTile = (key, title, g, emptyText) =>
     g
-      ? `<button type="button" class="card tile tile--game area-${key}" data-action="edit" data-id="${g.id}" aria-label="${title}: ${g.myScore} to ${g.oppScore}, ${shortDate(g.date)}. Edit game.">
-          <span class="tile__title">${title}</span>
+      ? `<section class="card tile area-${key}" aria-label="${title}: ${g.myScore} to ${g.oppScore}, ${shortDate(g.date)}">
+          <h3 class="tile__title">${title}</h3>
           <span class="mini-match">${logo(g.myTeam, { size: 'sm', alt: '' })}${logo(g.oppTeam, { size: 'sm', alt: '' })}</span>
           <span class="tile__score"><span class="${g.win ? 'is-win' : 'is-loss'}">${g.myScore}</span><span class="dash">–</span>${g.oppScore}</span>
           <span class="tile__sub">${g.win ? 'Won' : 'Lost'} by ${Math.abs(g.margin)}${g.overtime ? ' · OT' : ''} · ${shortDate(g.date)}</span>
-        </button>`
+        </section>`
       : `<section class="card tile area-${key}"><h3 class="tile__title">${title}</h3><p class="tile__empty">${emptyText}</p></section>`;
   const prevRing = prev.ring ?? 0;
   prev.ring = pct;
@@ -551,6 +551,28 @@ function renderHistory() {
 
 // ---------- settings ----------
 
+// Theme colours. Each swaps the blue accent (see the end of tokens.css); the swatch shows the
+// colour as it looks in light and dark mode. Saved per device and applied before first paint.
+const ACCENTS = [
+  { id: 'blue', name: 'Blue', light: '#007AFF', dark: '#0A84FF' },
+  { id: 'indigo', name: 'Indigo', light: '#5856D6', dark: '#5E5CE6' },
+  { id: 'purple', name: 'Purple', light: '#AF52DE', dark: '#BF5AF2' },
+  { id: 'pink', name: 'Pink', light: '#FF2D55', dark: '#FF375F' },
+  { id: 'orange', name: 'Orange', light: '#FF9500', dark: '#FF9F0A' },
+  { id: 'teal', name: 'Teal', light: '#30B0C7', dark: '#40C8E0' },
+  { id: 'graphite', name: 'Graphite', light: '#8E8E93', dark: '#98989D' },
+];
+const ACCENT_KEY = 'h2h.accent';
+const currentAccent = () => document.documentElement.dataset.accent || 'blue';
+function setAccent(id) {
+  if (id === 'blue') document.documentElement.removeAttribute('data-accent');
+  else document.documentElement.dataset.accent = id;
+  try {
+    if (id === 'blue') localStorage.removeItem(ACCENT_KEY);
+    else localStorage.setItem(ACCENT_KEY, id);
+  } catch {}
+}
+
 function renderSettings() {
   const el = $('#settings-content');
   const me = state.me;
@@ -574,6 +596,16 @@ function renderSettings() {
       <li><button type="button" class="cell cell--button cell--destructive" id="signout-btn">Sign Out</button></li>
     </ul>
     <p class="group__foot">You stay signed in on this device. Changing your PIN signs you out everywhere else. Turn on Require PIN to be asked for it each time the app opens.</p>
+  </section>
+
+  <section class="group" aria-labelledby="set-theme">
+    <div class="group__head"><h2 id="set-theme">Theme</h2></div>
+    <div class="list swatches" role="radiogroup" aria-labelledby="set-theme">
+      ${ACCENTS.map(
+        (a) => `<button type="button" class="swatch" role="radio" data-swatch="${a.id}" aria-checked="${a.id === currentAccent()}" aria-label="${a.name}" style="--sw-light:${a.light};--sw-dark:${a.dark}">${icon('check', 'swatch__check')}</button>`,
+      ).join('')}
+    </div>
+    <p class="group__foot">Changes the app’s colour on this device.</p>
   </section>
 
   <section class="group" aria-labelledby="set-sync">
@@ -626,6 +658,13 @@ function initSettings() {
     }
   });
   root.addEventListener('click', (e) => {
+    const swatch = e.target.closest('[data-swatch]');
+    if (swatch) {
+      haptic('light');
+      setAccent(swatch.dataset.swatch);
+      root.querySelectorAll('[data-swatch]').forEach((b) => b.setAttribute('aria-checked', String(b === swatch)));
+      return;
+    }
     const id = e.target.closest('button')?.id;
     if (id === 'refresh-btn') {
       haptic('light');
@@ -876,7 +915,7 @@ function openGameSheet({ id = null } = {}) {
       <button type="submit" form="game-form" class="btn-text btn-text--strong" data-sheet="save" disabled>Save</button>
     </header>
     <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
-      <div class="matchup">
+      <div class="h2hpop">
         <div class="side">
           <span class="side__name">You</span>
           <div class="side__tile" data-slot="myTeam">${teamTile('myTeam', draft.myTeam)}</div>
@@ -1154,7 +1193,7 @@ function openProfile(userId) {
                 <span class="friend-row__record ${cls}" aria-label="${winsLosses(o.wins, o.losses)}">${o.wins}–${o.losses}</span>`;
               return o.id === meId() && !isMe
                 ? `<li><button type="button" class="cell cell--button friend-row" data-profile-rivalry>${inner}</button></li>`
-                : `<li class="cell friend-row">${inner}</li>`;
+                : `<li><button type="button" class="cell cell--plain friend-row" data-profile-h2h="${esc(o.id)}">${inner}</button></li>`;
             })
             .join('')}
         </ul>
@@ -1204,12 +1243,49 @@ function openProfile(userId) {
       body.innerHTML = '<p class="search-note"><span class="spinner spinner--sm" aria-hidden="true"></span> Loading stats…</p>';
       return load();
     }
+    const h2hBtn = e.target.closest('[data-profile-h2h]');
+    if (h2hBtn && data) return matchupPopup(data, h2hBtn.dataset.profileH2h);
     if (e.target.closest('[data-profile-rivalry]')) {
       e.stopPropagation();
       store.setRival(userId);
       sheet.close();
       show('dashboard');
     }
+  });
+}
+
+/** One player's head-to-head against one opponent, from a profile's Played Against list. */
+function matchupPopup({ user, opponents, games }, oppId) {
+  const involves = (g, id) => g.player1_id === id || g.player2_id === id;
+  const pair = games.filter((g) => involves(g, user.id) && involves(g, oppId));
+  const st = computeStats(pair, user.id);
+  const v = views(pair, user.id);
+  const isMe = user.id === meId();
+  const name = isMe ? 'You' : user.display_name;
+  const opp = oppId === meId() ? 'You' : opponents.find((u) => u.id === oppId)?.display_name || 'Unknown';
+  const pct = st.total ? Math.round(st.pct * 100) : 0;
+  openPopup({
+    title: `${name} vs ${opp}`,
+    subtitle: `${st.total} ${st.total === 1 ? 'game' : 'games'} · from ${isMe ? 'your' : `${name}’s`} side`,
+    body: st.total
+      ? `<div class="h2hpop">
+          <div class="h2hpop__top">
+            <p class="record" aria-label="${winsLosses(st.wins, st.losses)}">${st.wins}<span class="record__dash">–</span>${st.losses}</p>
+            <p class="h2hpop__pct"><span class="${pct >= 50 ? 'is-win' : 'is-loss'}">${pct}%</span> win rate</p>
+          </div>
+          <dl class="trio">
+            <div><dt>Current Streak</dt><dd class="${st.streak.win ? 'is-win' : 'is-loss'}">${st.streak.win ? 'W' : 'L'}${st.streak.count}</dd></div>
+            <div><dt>Longest Win</dt><dd class="${st.longestWin ? 'is-win' : ''}">W${st.longestWin}</dd></div>
+            <div><dt>Longest Loss</dt><dd class="${st.longestLoss ? 'is-loss' : ''}">L${st.longestLoss}</dd></div>
+          </dl>
+          <dl class="trio">
+            <div><dt>Avg Scored</dt><dd>${formatNumber(st.avgFor, { decimals: 1 })}</dd></div>
+            <div><dt>Avg Allowed</dt><dd>${formatNumber(st.avgAgainst, { decimals: 1 })}</dd></div>
+            <div><dt>Avg Margin</dt><dd class="${st.avgMargin >= 0 ? 'is-win' : 'is-loss'}">${formatNumber(st.avgMargin, { decimals: 1, signed: true })}</dd></div>
+          </dl>
+        </div>
+        <ul class="list list--games" role="list">${v.map((g) => staticGameRow(g, null, { withMonth: true })).join('')}</ul>`
+      : '<p class="popup__empty">No games yet.</p>',
   });
 }
 

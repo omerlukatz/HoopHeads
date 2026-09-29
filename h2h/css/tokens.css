@@ -154,3 +154,95 @@
     --gutter: 32px;
   }
 }
+
+/* ============ Theme colours (Settings → Theme) ============
+   Each swaps the blue accent. Text shades are ≥4.5:1 on the card and grouped backgrounds, and
+   fills are ≥4.5:1 under white text, in both light and dark. Blue is the default above. */
+
+:root[data-accent="indigo"] {
+  --accent: #5856D6;
+  --accent-text: #5856D6;
+  --accent-fill: #5856D6;
+  --accent-tint: rgba(88, 86, 214, 0.1);
+  --focus: 0 0 0 3px rgba(88, 86, 214, 0.45);
+}
+:root[data-accent="purple"] {
+  --accent: #AF52DE;
+  --accent-text: #A338D9;
+  --accent-fill: #A338D9;
+  --accent-tint: rgba(175, 82, 222, 0.1);
+  --focus: 0 0 0 3px rgba(175, 82, 222, 0.45);
+}
+:root[data-accent="pink"] {
+  --accent: #FF2D55;
+  --accent-text: #DE002A;
+  --accent-fill: #DE002A;
+  --accent-tint: rgba(255, 45, 85, 0.1);
+  --focus: 0 0 0 3px rgba(255, 45, 85, 0.45);
+}
+:root[data-accent="orange"] {
+  --accent: #FF9500;
+  --accent-text: #A15E00;
+  --accent-fill: #AB6400;
+  --accent-tint: rgba(255, 149, 0, 0.1);
+  --focus: 0 0 0 3px rgba(255, 149, 0, 0.45);
+}
+:root[data-accent="teal"] {
+  --accent: #30B0C7;
+  --accent-text: #217989;
+  --accent-fill: #237F8F;
+  --accent-tint: rgba(48, 176, 199, 0.1);
+  --focus: 0 0 0 3px rgba(48, 176, 199, 0.45);
+}
+:root[data-accent="graphite"] {
+  --accent: #8E8E93;
+  --accent-text: #6E6E73;
+  --accent-fill: #747479;
+  --accent-tint: rgba(142, 142, 147, 0.1);
+  --focus: 0 0 0 3px rgba(142, 142, 147, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="indigo"] {
+    --accent: #5E5CE6;
+    --accent-text: #8A89ED;
+    --accent-fill: #5856D6;
+    --accent-tint: rgba(94, 92, 230, 0.2);
+    --focus: 0 0 0 3px rgba(94, 92, 230, 0.45);
+  }
+  :root[data-accent="purple"] {
+    --accent: #BF5AF2;
+    --accent-text: #C66CF3;
+    --accent-fill: #A338D9;
+    --accent-tint: rgba(191, 90, 242, 0.2);
+    --focus: 0 0 0 3px rgba(191, 90, 242, 0.45);
+  }
+  :root[data-accent="pink"] {
+    --accent: #FF375F;
+    --accent-text: #FF5678;
+    --accent-fill: #DE002A;
+    --accent-tint: rgba(255, 55, 95, 0.2);
+    --focus: 0 0 0 3px rgba(255, 55, 95, 0.45);
+  }
+  :root[data-accent="orange"] {
+    --accent: #FF9F0A;
+    --accent-text: #FF9F0A;
+    --accent-fill: #AB6400;
+    --accent-tint: rgba(255, 159, 10, 0.2);
+    --focus: 0 0 0 3px rgba(255, 159, 10, 0.45);
+  }
+  :root[data-accent="teal"] {
+    --accent: #40C8E0;
+    --accent-text: #40C8E0;
+    --accent-fill: #237F8F;
+    --accent-tint: rgba(64, 200, 224, 0.2);
+    --focus: 0 0 0 3px rgba(64, 200, 224, 0.45);
+  }
+  :root[data-accent="graphite"] {
+    --accent: #98989D;
+    --accent-text: #98989D;
+    --accent-fill: #747479;
+    --accent-tint: rgba(152, 152, 157, 0.2);
+    --focus: 0 0 0 3px rgba(152, 152, 157, 0.45);
+  }
+}
