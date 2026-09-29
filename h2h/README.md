@@ -66,7 +66,7 @@ When you ship changes, bump `VERSION` in `sw.js`.
   Game Mode picks which one the app shows, and it opens on whichever game you logged last. The screens
   are the same; FIFA swaps in draws (W–D–L), goals and goal difference, extra time (ET), penalty
   shootouts (PEN, stored as `player1_pens` / `player2_pens`), 1-goal games and clean sheets. FIFA
-  teams are stored as `F-` + code (e.g. `F-ARS`) and show the code on the club colour until badges are added.
+  teams come from the `FIFA Clubs/` folder (country → team in the picker) and are stored as `F-` + code (e.g. `F-ARS`).
 - **Soft deletes.** Deleting sets `deleted = TRUE` in the Sheet. Undo sets it back.
 
 ## Project layout
@@ -93,6 +93,7 @@ assets/logos/           30 normalized 256×256 transparent WebP logos (abbr.webp
 tools/process_logos.py  Re-runnable logo pipeline (originals → assets/logos)
 tools/process_icon.py   App icons, favicon and link-preview image from tools/logo-source.webp
 tools/process_avatars.py Profile pictures (~/Desktop/H2H-Avatars → assets/avatars)
+tools/process_clubs.py  FIFA teams: "FIFA Clubs/" → assets/clubs, assets/flags and js/clubs.js
 tools/logo-sources/     Renamed copies of the original logo files
 ```
 

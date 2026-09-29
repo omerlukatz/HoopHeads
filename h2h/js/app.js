@@ -1,4 +1,4 @@
-import { getTeam, searchTeams, teamsFor } from './teams.js';
+import { getTeam, searchTeams, teamsFor, FIFA_GROUPS, CLUBS } from './teams.js';
 import * as store from './store.js';
 import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
@@ -1524,6 +1524,7 @@ function openOpponentPicker(currentId) {
 // ---------- team picker ----------
 
 function openTeamPicker(side, current, opponent = store.rival(), sport = state.mode) {
+  if (sport === 'fifa') return openClubPicker(side, current, opponent);
   return new Promise((resolve) => {
     const whose = side === 'myTeam' ? 'You' : opponent?.display_name || oppName();
     const list = teamsFor(sport);
@@ -1598,6 +1599,121 @@ function openTeamPicker(side, current, opponent = store.rival(), sport = state.m
         chosen = btn.dataset.abbr;
         haptic('light');
         sheet.close();
+      } else if (e.target.closest('[data-sheet="cancel"]')) sheet.close();
+    });
+  });
+}
+
+/**
+ * FIFA team picker, in two steps: pick a country (or National Teams), then a team from it.
+ * Search looks across every team. Opens straight on the current team's country when there is one.
+ */
+function openClubPicker(side, current, opponent) {
+  return new Promise((resolve) => {
+    const whose = side === 'myTeam' ? 'You' : opponent?.display_name || oppName();
+    const recent = recentTeams(opponent ? views(store.pairGames(opponent.id), meId()) : ui.views, side, 8).filter((k) => CLUBS.includes(getTeam(k)));
+    const cell = (team) => {
+      const selected = team.key === current;
+      return `<button type="button" class="team-cell${selected ? ' is-selected' : ''}" data-abbr="${team.key}" aria-label="${esc(team.name)}"${selected ? ' aria-current="true"' : ''}>
+        ${logo(team.key, { size: 'md', alt: '', lazy: true })}<span class="team-cell__name">${esc(team.nickname)}</span></button>`;
+    };
+    const flag = (g) =>
+      g.flag ? `<img class="country__flag" src="${g.flag}" alt="" width="36" height="24" decoding="async">` : `<span class="country__flag country__flag--world">${icon('soccer')}</span>`;
+
+    const content = document.createElement('div');
+    content.className = 'sheet__content';
+    content.innerHTML = `
+      <header class="sheet__header">
+        <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
+        <div class="sheet__title-group"><h2 id="picker-title" class="sheet__title">Choose Team</h2><p class="sheet__subtitle">${esc(whose)}</p></div>
+        <span></span>
+      </header>
+      <div class="sheet__body picker">
+        <div class="search">
+          ${icon('search')}
+          <input type="search" id="team-search" placeholder="Search all teams" aria-label="Search all FIFA teams" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+          <button type="button" class="search__clear" aria-label="Clear search" hidden>${icon('clear')}</button>
+        </div>
+        <div data-view="countries">
+          ${recent.length ? `<section class="picker__section" aria-labelledby="recent-teams"><h3 class="picker__label" id="recent-teams">Recent</h3><div class="team-grid team-grid--clubs">${recent.map((k) => cell(getTeam(k))).join('')}</div></section>` : ''}
+          <section class="picker__section" aria-labelledby="countries-title">
+            <h3 class="picker__label" id="countries-title">Countries</h3>
+            <ul class="list list--sheet" role="list">
+              ${FIFA_GROUPS.map(
+                (g) => `<li><button type="button" class="cell cell--button country" data-country="${g.id}">
+                  ${flag(g)}<span class="cell__stack"><span class="cell__title">${esc(g.name)}</span><span class="cell__sub">${esc(g.league)} · ${g.teams.length} teams</span></span>
+                  <svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button></li>`,
+              ).join('')}
+            </ul>
+          </section>
+        </div>
+        <div data-view="teams" hidden>
+          <div class="picker__crumb">
+            <button type="button" class="btn-text picker__back" data-back><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.75-6.25 6.25 6.25 6.25"/></svg>Countries</button>
+            <span class="picker__country" data-country-title></span>
+          </div>
+          <div class="team-grid team-grid--clubs" data-country-grid></div>
+        </div>
+        <div data-view="search" hidden>
+          <div class="team-grid team-grid--clubs" data-search-grid></div>
+          <p class="picker__empty" hidden></p>
+        </div>
+      </div>`;
+
+    let chosen = null;
+    const sheet = openSheet({ content, labelledBy: 'picker-title', large: true, onClose: () => resolve(chosen) });
+    const views_ = { countries: $('[data-view="countries"]', content), teams: $('[data-view="teams"]', content), search: $('[data-view="search"]', content) };
+    const search = $('#team-search', content);
+    const clear = $('.search__clear', content);
+    const empty = $('.picker__empty', content);
+    let country = null;
+    const showView = (name) => Object.entries(views_).forEach(([k, el]) => (el.hidden = k !== name));
+    const openCountry = (id) => {
+      const g = FIFA_GROUPS.find((x) => x.id === id);
+      country = id;
+      $('[data-country-title]', content).innerHTML = `${g.flag ? `<img class="country__flag country__flag--sm" src="${g.flag}" alt="" width="24" height="16">` : ''}${esc(g.name)}`;
+      $('[data-country-grid]', content).innerHTML = g.teams.map(cell).join('');
+      showView('teams');
+      content.closest('.sheet')?.querySelector('.sheet__body')?.scrollTo?.({ top: 0 });
+    };
+    const filter = () => {
+      const q = search.value.trim();
+      clear.hidden = !q;
+      if (!q) return country ? openCountry(country) : showView('countries');
+      const matches = searchTeams(q, CLUBS);
+      $('[data-search-grid]', content).innerHTML = matches.map(cell).join('');
+      empty.hidden = matches.length > 0;
+      empty.textContent = matches.length ? '' : `No teams match “${q}”`;
+      showView('search');
+    };
+    search.addEventListener('input', filter);
+    search.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      $('[data-search-grid] .team-cell', content)?.click();
+    });
+    clear.addEventListener('click', () => {
+      search.value = '';
+      filter();
+      search.focus();
+    });
+    // Editing or re-picking: start in the current team's country
+    const currentCountry = getTeam(current)?.country;
+    if (currentCountry) openCountry(currentCountry);
+
+    content.addEventListener('click', (e) => {
+      const btn = e.target.closest('.team-cell');
+      const countryBtn = e.target.closest('[data-country]');
+      if (btn) {
+        chosen = btn.dataset.abbr;
+        haptic('light');
+        sheet.close();
+      } else if (countryBtn) {
+        haptic('light');
+        openCountry(countryBtn.dataset.country);
+      } else if (e.target.closest('[data-back]')) {
+        country = null;
+        showView('countries');
       } else if (e.target.closest('[data-sheet="cancel"]')) sheet.close();
     });
   });
