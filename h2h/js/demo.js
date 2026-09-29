@@ -2,6 +2,7 @@
 // behaviour (sign-up, hashed PINs, sessions, lockout after 5 wrong tries, instant friends,
 // friend-only games, soft deletes, validation, network latency) but stores everything in
 // this browser.
+import { uuid, sha256 } from './crypto.js';
 import { getTeam } from './teams.js';
 import { generateSampleGames } from './sample.js';
 
@@ -46,10 +47,6 @@ function load() {
 }
 const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
 
-async function sha256(text) {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 export const controls = {
   get offline() {
@@ -101,7 +98,7 @@ export function createDemoBackend(ApiError) {
   const friendIds = (s, id) => s.friendships.filter((f) => f.user_a === id || f.user_b === id).map((f) => (f.user_a === id ? f.user_b : f.user_a));
   const clean = (g) => Object.fromEntries(Object.entries(g).filter(([k]) => !k.startsWith('_')));
   const session = (s, userId) => {
-    const token = crypto.randomUUID();
+    const token = uuid();
     s.sessions[token] = userId;
     return token;
   };
@@ -116,7 +113,7 @@ export function createDemoBackend(ApiError) {
       if (!display || display.length > 24) throw new ApiError('Enter a name up to 24 characters.', 'invalid');
       if (!/^\d{4}$/.test(String(pin))) throw new ApiError('Your PIN must be 4 digits.', 'invalid');
       if (s.users.some((u) => u.username === name)) throw new ApiError('That username is taken.', 'taken');
-      const id = `u_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      const id = `u_${uuid().replace(/-/g, '').slice(0, 16)}`;
       const h = [...name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0);
       const user = { id, username: name, display_name: display, color: COLORS[Math.abs(h) % COLORS.length], initial: display[0].toUpperCase(), pin_hash: await sha256(`${SALT}:${id}:${pin}`), created_at: new Date().toISOString() };
       s.users.push(user);
@@ -189,7 +186,7 @@ export function createDemoBackend(ApiError) {
       if (!other || other.id === user.id) throw new ApiError('Pick someone else to add.', 'invalid');
       if (!friendIds(s, user.id).includes(userId)) {
         const [a, b] = [user.id, userId].sort();
-        s.friendships.push({ id: crypto.randomUUID(), user_a: a, user_b: b, created_at: new Date().toISOString() });
+        s.friendships.push({ id: uuid(), user_a: a, user_b: b, created_at: new Date().toISOString() });
         save(s);
       }
       return pub(other);

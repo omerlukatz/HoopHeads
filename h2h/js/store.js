@@ -8,6 +8,7 @@
 // - The outbox is flushed in order; adds are idempotent on the server, so retries are safe.
 //   When offline, entries simply wait and are sent when the connection returns.
 // - Fetches re-apply anything still in the outbox, so a poll never "undoes" a pending change.
+import { uuid, sha256 } from './crypto.js';
 import * as api from './api.js';
 import { CONFIG } from '../config.js';
 
@@ -125,10 +126,6 @@ function setStatus(status, error = null) {
   emit({ status: true });
 }
 
-async function sha256(text) {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 // ---------- prefs (per device) ----------
 
@@ -215,7 +212,7 @@ const now = () => new Date().toISOString();
 /** `game` is neutral (player1/player2). Returns the stored game. */
 export function addGame(game) {
   const stamp = now();
-  const full = { ...game, id: crypto.randomUUID(), created_by: state.session.userId, created_at: stamp, updated_at: stamp, deleted: false };
+  const full = { ...game, id: uuid(), created_by: state.session.userId, created_at: stamp, updated_at: stamp, deleted: false };
   queue(full, { isNew: true });
   emit({ added: full.id });
   sync();
