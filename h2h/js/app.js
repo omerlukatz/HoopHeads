@@ -197,14 +197,14 @@ const noFriendsState = () => `<div class="empty">
   </div>`;
 
 const resultPill = (g) => `<span class="pill pill--${g.result.toLowerCase()}" aria-label="${resultWord(g)}">${g.result}</span>`;
-/** Orange marker for how the game was decided: O (2K overtime), ET (extra time) or PEN (shootout). */
+/** Orange marker for how the game was decided: OT (2K overtime), ET (FIFA extra time) or PEN (shootout). */
 const extraPill = (g) =>
   g.shootout
     ? '<span class="pill pill--ot" aria-label="Penalties">PEN</span>'
     : g.overtime
       ? g.sport === 'fifa'
         ? '<span class="pill pill--ot" aria-label="Extra time">ET</span>'
-        : '<span class="pill pill--ot" aria-label="Overtime">O</span>'
+        : '<span class="pill pill--ot" aria-label="Overtime">OT</span>'
       : '';
 /** W/D/L pill on the far right, with the orange marker to its left. */
 const resultPills = (g) => `<span class="row__pills">${extraPill(g)}${resultPill(g)}</span>`;
@@ -1012,14 +1012,12 @@ function openGameSheet({ id = null } = {}) {
   // and can be switched by tapping the opponent's name.
   const otherId = editing ? (source.player1_id === meId() ? source.player2_id : source.player1_id) : state.rivalId;
   let opponent = state.friends.find((f) => f.id === otherId) || store.rival();
-  const lastVs = (fid) => views(store.pairGames(fid), meId())[0];
-  const last = lastVs(opponent.id);
   // The sport is fixed when editing; a new game is logged in the current game mode
   const sport = editing ? sportOf(source) : state.mode;
   const fifa = sport === 'fifa';
   const draft = editing
     ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note, myPens: view.myPens ?? '', oppPens: view.oppPens ?? '' }
-    : { date: todayISO(), myTeam: last?.myTeam ?? ui.views[0]?.myTeam ?? null, oppTeam: last?.oppTeam ?? null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' };
+    : { date: todayISO(), myTeam: null, oppTeam: null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' }; // new games start with both teams empty
   const opp = opponent.display_name;
   const canSwitch = !editing && state.friends.length > 1;
 
@@ -1128,9 +1126,6 @@ function openGameSheet({ id = null } = {}) {
       $('[data-opp-name]', oppBtn).textContent = chosen.display_name;
       oppBtn.setAttribute('aria-label', `Playing against ${chosen.display_name}. Change opponent`);
       form.oppScore.setAttribute('aria-label', `${chosen.display_name}’s score`);
-      // Pre-fill the teams from your last game against this friend
-      const prev = lastVs(chosen.id);
-      if (prev) Object.assign(draft, { myTeam: prev.myTeam, oppTeam: prev.oppTeam });
       for (const side of ['myTeam', 'oppTeam']) $(`[data-slot="${side}"]`, content).innerHTML = teamTile(side, draft[side], chosen.display_name);
       const tile = $('[data-slot="oppTeam"] .team-tile', content);
       tile.classList.add('is-popping');
