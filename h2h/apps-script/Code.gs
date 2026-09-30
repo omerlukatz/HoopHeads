@@ -12,14 +12,15 @@
  *                sport ('2k' or 'fifa'; empty = 2k), player1_pens, player2_pens (FIFA shootouts)
  *
  * API (every response is JSON: { ok: true, data } or { ok: false, error, code })
+ *   GET  ?action=bootstrap&token=...           -> { me, friends, games } in one call (what the app polls)
  *   GET  ?action=me&token=...                  -> your user
  *   GET  ?action=friends&token=...             -> your friends
  *   GET  ?action=search&token=...&q=...        -> users matching a name or username
  *   GET  ?action=games&token=...               -> every non-deleted game you played in
  *   GET  ?action=blocked&token=...             -> users you've blocked
  *   GET  ?action=profile&token=...&userId=...  -> a friend's (or your own) profile: user, opponents, games
- *   POST { action: 'signUp', username, displayName, pin }  -> { token, user }
- *   POST { action: 'signIn', username, pin }               -> { token, user }
+ *   POST { action: 'signUp', username, displayName, pin }  -> { token, user, friends, games }
+ *   POST { action: 'signIn', username, pin }               -> { token, user, friends, games }
  *   POST { action: 'signOut', token }                      -> {}
  *   POST { action: 'updateProfile', token, username?, displayName?, avatar? } -> user
  *   POST { action: 'changePin', token, currentPin, newPin }  -> { token } (other devices are signed out)
@@ -85,6 +86,7 @@ function resetPin() {
   if (!found) throw new Error('No user named ' + USERNAME + '.');
   const sheet = sheet_('Users');
   sheet.getRange(found.row, colIndex_(sheet, 'pin_hash')).setValue(hash_(found.user.id, NEW_PIN));
+  touch_(sheet);
   endSessionsFor_(found.user.id);
   PropertiesService.getScriptProperties().deleteProperty('fails:' + found.user.username);
   Logger.log('PIN reset for @' + found.user.username + '.');
@@ -116,7 +118,7 @@ function seedTestPlayers() {
   if (!you) throw new Error('No user named ' + YOUR_USERNAME + '. Fix YOUR_USERNAME at the top of seedTestPlayers.');
 
   const NAMES = ['Marcus', 'Tyler', 'Jalen', 'Devin', 'Chris', 'Isaiah', 'Andre', 'Malik', 'Noah', 'Eli', 'Darius', 'Kobe', 'Luka', 'Zion', 'Trey', 'Miles', 'Jamal', 'Nico', 'Omar', 'Leo'];
-  const taken = readObjects_(sheet_('Users')).map(function (u) { return String(u.username).toLowerCase(); });
+  const taken = readObjects_('Users').map(function (u) { return String(u.username).toLowerCase(); });
   const pool = NAMES.filter(function (n) { return taken.indexOf('test_' + n.toLowerCase()) === -1; });
   if (pool.length < 3) throw new Error('Not enough unused test names. Run removeTestPlayers first.');
   shuffle_(pool);
@@ -190,6 +192,7 @@ function seedTestPlayers() {
     const cols = games.getRange(1, 1, 1, games.getLastColumn()).getValues()[0];
     const ordered = rows.map(function (r) { return cols.map(function (c) { const i = headers.indexOf(c); return i === -1 ? '' : r[i]; }); });
     games.getRange(games.getLastRow() + 1, 1, ordered.length, cols.length).setNumberFormat('@').setValues(ordered);
+    touch_(games);
     Logger.log('Added ' + players.map(function (p) { return p.user.display_name + ' (@' + p.user.username + ')'; }).join(', ') +
       ' with ' + ordered.length + ' games between them. They are now friends with @' + you.user.username + '.' +
       (TEST_PIN ? ' They can sign in with the TEST_PIN.' : ''));
@@ -207,6 +210,7 @@ function removeTestPlayers() {
     const removeRows = function (sheet, test) {
       const rows = readRows_(sheet).filter(function (r) { return test(r.data); });
       rows.reverse().forEach(function (r) { sheet.deleteRow(r.row); }); // bottom-up keeps row numbers valid
+      touch_(sheet);
       return rows.length;
     };
     const games = removeRows(sheet_('Games'), function (g) { return isTest(g.player1_id) || isTest(g.player2_id); });
@@ -241,6 +245,7 @@ function doGet(e) {
     const p = (e && e.parameter) || {};
     const me = requireSession_(p.token);
     switch (p.action) {
+      case 'bootstrap': return bootstrap_(me);
       case 'me': return publicUser_(me);
       case 'friends': return listFriends_(me.id);
       case 'search': return searchUsers_(me.id, p.q);
@@ -305,13 +310,13 @@ function signUp_(username, displayName, pin) {
       created_at: new Date().toISOString(),
     };
     appendRow_(sheet_('Users'), user);
-    return { token: newSession_(id), user: publicUser_(user) };
+    return { token: newSession_(id), user: publicUser_(user), friends: [], games: [] };
   });
 }
 
 function signIn_(username, pin) {
   const name = String(username || '').trim().toLowerCase();
-  return withLock_(function () {
+  const result = withLock_(function () {
     const props = PropertiesService.getScriptProperties();
     const key = 'fails:' + name;
     const fails = JSON.parse(props.getProperty(key) || '{"count":0,"lockedUntil":0}');
@@ -330,9 +335,17 @@ function signIn_(username, pin) {
       throw apiError_('Wrong username or PIN.', 'auth', { triesLeft: MAX_TRIES - fails.count });
     }
     props.deleteProperty(key);
-    pruneSessions_();
-    return { token: newSession_(found.user.id), user: publicUser_(found.user) };
+    return { token: newSession_(found.user.id), user: found.user };
   });
+  // Everything the app needs to show the dashboard straight away (read outside the lock)
+  const data = bootstrap_(result.user);
+  if (Math.random() < 0.05) pruneSessions_(); // tidy expired sessions now and then, not on every sign-in
+  return { token: result.token, user: data.me, friends: data.friends, games: data.games };
+}
+
+/** Your profile, friends and games in one response: one execution instead of three. */
+function bootstrap_(me) {
+  return { me: publicUser_(me), friends: listFriends_(me.id), games: listGames_(me.id) };
 }
 
 function updateProfile_(me, username, displayName, avatar) {
@@ -386,13 +399,17 @@ function changePin_(me, currentPin, newPin) {
     const found = findUserByUsername_(me.username);
     const sheet = sheet_('Users');
     sheet.getRange(found.row, colIndex_(sheet, 'pin_hash')).setNumberFormat('@').setValue(hash_(me.id, String(newPin)));
+    touch_(sheet);
     endSessionsFor_(me.id); // sign out every other device
     return { token: newSession_(me.id) };
   });
 }
 
 function signOut_(token) {
-  if (token) PropertiesService.getScriptProperties().deleteProperty('session:' + token);
+  if (token) {
+    PropertiesService.getScriptProperties().deleteProperty('session:' + token);
+    CacheService.getScriptCache().remove('session:' + token);
+  }
   return {};
 }
 
@@ -405,22 +422,34 @@ function newSession_(userId) {
 /** Returns the signed-in user (full row), or throws an 'auth' error. */
 function requireSession_(token) {
   const props = PropertiesService.getScriptProperties();
-  const raw = token && props.getProperty('session:' + token);
+  const cache = CacheService.getScriptCache();
+  let raw = token && cache.get('session:' + token);
+  if (token && !raw) {
+    raw = props.getProperty('session:' + token);
+    if (raw) cache.put('session:' + token, raw, 600); // 10 minutes; removed on sign-out / PIN change
+  }
   const session = raw && JSON.parse(raw);
   if (!session || session.expires < Date.now()) {
-    if (raw) props.deleteProperty('session:' + token);
+    if (raw) {
+      props.deleteProperty('session:' + token);
+      cache.remove('session:' + token);
+    }
     throw apiError_('Your session has ended. Sign in again.', 'auth');
   }
-  const user = readObjects_(sheet_('Users')).find(function (u) { return u.id === session.userId; });
+  const user = readObjects_('Users').find(function (u) { return u.id === session.userId; });
   if (!user) throw apiError_('This account no longer exists.', 'auth');
   return user;
 }
 
 function endSessionsFor_(userId) {
   const props = PropertiesService.getScriptProperties();
+  const cache = CacheService.getScriptCache();
   const all = props.getProperties();
   Object.keys(all).forEach(function (k) {
-    if (k.indexOf('session:') === 0 && JSON.parse(all[k]).userId === userId) props.deleteProperty(k);
+    if (k.indexOf('session:') === 0 && JSON.parse(all[k]).userId === userId) {
+      props.deleteProperty(k);
+      cache.remove(k);
+    }
   });
 }
 
@@ -456,20 +485,20 @@ function publicUser_(u) {
 function findUserByUsername_(username) {
   const name = String(username || '').trim().toLowerCase();
   if (!name) return null;
-  const rows = readRows_(sheet_('Users'));
+  const rows = readRows_('Users');
   const hit = rows.find(function (r) { return String(r.data.username).toLowerCase() === name; });
   return hit ? { row: hit.row, user: hit.data } : null;
 }
 
 function friendIds_(userId) {
-  return readObjects_(sheet_('Friendships'))
+  return readObjects_('Friendships')
     .filter(function (f) { return f.user_a === userId || f.user_b === userId; })
     .map(function (f) { return f.user_a === userId ? f.user_b : f.user_a; });
 }
 
 function listFriends_(userId) {
   const ids = friendIds_(userId);
-  return readObjects_(sheet_('Users'))
+  return readObjects_('Users')
     .filter(function (u) { return ids.indexOf(u.id) !== -1; })
     .map(publicUser_);
 }
@@ -479,7 +508,7 @@ function searchUsers_(userId, query) {
   if (q.length < 2) return [];
   const friends = friendIds_(userId);
   const hidden = blockedEitherWay_(userId);
-  return readObjects_(sheet_('Users'))
+  return readObjects_('Users')
     .filter(function (u) {
       return u.id !== userId && hidden.indexOf(u.id) === -1 && (String(u.username).toLowerCase().indexOf(q) !== -1 || String(u.display_name).toLowerCase().indexOf(q) !== -1);
     })
@@ -489,7 +518,7 @@ function searchUsers_(userId, query) {
 
 function addFriend_(me, userId) {
   if (!userId || userId === me.id) throw apiError_('Pick someone else to add.', 'invalid');
-  const other = readObjects_(sheet_('Users')).find(function (u) { return u.id === userId; });
+  const other = readObjects_('Users').find(function (u) { return u.id === userId; });
   if (!other) throw apiError_('That user no longer exists.', 'invalid');
   if (blockedEitherWay_(me.id).indexOf(userId) !== -1) throw apiError_('You can’t add this person.', 'invalid');
   return withLock_(function () {
@@ -508,6 +537,7 @@ function deleteFriendship_(a, b) {
     return (r.data.user_a === a && r.data.user_b === b) || (r.data.user_a === b && r.data.user_b === a);
   });
   rows.reverse().forEach(function (r) { sheet.deleteRow(r.row); }); // bottom-up keeps row numbers valid
+  touch_(sheet);
 }
 
 function removeFriend_(me, userId) {
@@ -519,21 +549,21 @@ function removeFriend_(me, userId) {
 
 /** Users blocked by, or blocking, this user: neither side can find or add the other. */
 function blockedEitherWay_(userId) {
-  return readObjects_(sheet_('Blocks'))
+  return readObjects_('Blocks')
     .filter(function (b) { return b.blocker === userId || b.blocked === userId; })
     .map(function (b) { return b.blocker === userId ? b.blocked : b.blocker; });
 }
 
 function listBlocked_(userId) {
-  const ids = readObjects_(sheet_('Blocks')).filter(function (b) { return b.blocker === userId; }).map(function (b) { return b.blocked; });
-  return readObjects_(sheet_('Users')).filter(function (u) { return ids.indexOf(u.id) !== -1; }).map(publicUser_);
+  const ids = readObjects_('Blocks').filter(function (b) { return b.blocker === userId; }).map(function (b) { return b.blocked; });
+  return readObjects_('Users').filter(function (u) { return ids.indexOf(u.id) !== -1; }).map(publicUser_);
 }
 
 function blockUser_(me, userId) {
   if (!userId || userId === me.id) throw apiError_('Pick someone else to block.', 'invalid');
   return withLock_(function () {
     deleteFriendship_(me.id, userId);
-    const already = readObjects_(sheet_('Blocks')).some(function (b) { return b.blocker === me.id && b.blocked === userId; });
+    const already = readObjects_('Blocks').some(function (b) { return b.blocker === me.id && b.blocked === userId; });
     if (!already) appendRow_(sheet_('Blocks'), { id: Utilities.getUuid(), blocker: me.id, blocked: userId, created_at: new Date().toISOString() });
     return {};
   });
@@ -546,6 +576,7 @@ function unblockUser_(me, userId) {
       .filter(function (r) { return r.data.blocker === me.id && r.data.blocked === userId; })
       .reverse()
       .forEach(function (r) { sheet.deleteRow(r.row); });
+    touch_(sheet);
     return {};
   });
 }
@@ -557,7 +588,7 @@ function unblockUser_(me, userId) {
 function getProfile_(me, userId) {
   const id = userId || me.id;
   if (id !== me.id && friendIds_(me.id).indexOf(id) === -1) throw apiError_('You can only see your friends’ profiles.', 'invalid');
-  const users = readObjects_(sheet_('Users'));
+  const users = readObjects_('Users');
   const user = users.find(function (u) { return u.id === id; });
   if (!user) throw apiError_('That user no longer exists.', 'invalid');
   const games = listGames_(id);
@@ -575,7 +606,7 @@ function getProfile_(me, userId) {
  * ===================================================================== */
 
 function listGames_(userId) {
-  return readObjects_(sheet_('Games'))
+  return readObjects_('Games')
     .map(normalizeGame_)
     .filter(function (g) { return g.id && !g.deleted && (g.player1_id === userId || g.player2_id === userId); });
 }
@@ -719,8 +750,14 @@ function colIndex_(sheet, name) {
 }
 
 /** All rows as { row, data } keyed by the header row, so columns can be in any order. */
-function readRows_(sheet) {
-  const values = sheet.getDataRange().getValues();
+/**
+ * A whole tab as { row, data } keyed by the header row, so columns can be in any order.
+ * Accepts a tab name or a Sheet. Outside writes, the values come from a 60-second cache
+ * (opening the spreadsheet is the slowest part of every request). Every write clears the
+ * tab's cache, and code inside withLock_ always reads the live Sheet.
+ */
+function readRows_(sheetOrName) {
+  const values = sheetValues_(sheetOrName);
   const headers = values[0] || [];
   return values.slice(1).map(function (v, i) {
     const data = {};
@@ -729,8 +766,58 @@ function readRows_(sheet) {
   }).filter(function (r) { return r.data.id !== '' && r.data.id != null; });
 }
 
-function readObjects_(sheet) {
-  return readRows_(sheet).map(function (r) { return r.data; });
+function readObjects_(sheetOrName) {
+  return readRows_(sheetOrName).map(function (r) { return r.data; });
+}
+
+// ---------- cache ----------
+
+const CACHE_SECONDS = 60;
+let FRESH_ = false; // true inside withLock_: writes never act on cached rows
+
+function sheetValues_(sheetOrName) {
+  const name = typeof sheetOrName === 'string' ? sheetOrName : sheetOrName.getName();
+  const key = 'sheet:' + name;
+  if (!FRESH_) {
+    const hit = cacheGet_(key);
+    if (hit) return hit.map(function (row) { return row.map(function (v) { return v && v.$d != null ? new Date(v.$d) : v; }); });
+  }
+  const sheet = typeof sheetOrName === 'string' ? sheet_(name) : sheetOrName;
+  const values = sheet.getDataRange().getValues();
+  cachePut_(key, values.map(function (row) { return row.map(function (v) { return v instanceof Date ? { $d: v.getTime() } : v; }); }));
+  return values;
+}
+
+/** Call after changing a tab so the next read sees it. */
+function touch_(sheet) {
+  CacheService.getScriptCache().remove('sheet:' + sheet.getName());
+}
+
+// Values over 100 KB are split across keys: "key" holds the part count, "key:0", "key:1", … the parts.
+function cacheGet_(key) {
+  const cache = CacheService.getScriptCache();
+  const count = Number(cache.get(key));
+  if (!count) return null;
+  const keys = [];
+  for (let i = 0; i < count; i++) keys.push(key + ':' + i);
+  const parts = cache.getAll(keys);
+  let text = '';
+  for (let i = 0; i < count; i++) {
+    if (parts[key + ':' + i] == null) return null;
+    text += parts[key + ':' + i];
+  }
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+function cachePut_(key, value) {
+  const text = JSON.stringify(value);
+  const size = 40000; // characters per part: safely under 100 KB even for non-Latin names
+  const count = Math.max(1, Math.ceil(text.length / size));
+  if (count > 40) return; // too big to be worth caching
+  const map = {};
+  for (let i = 0; i < count; i++) map[key + ':' + i] = text.substr(i * size, size);
+  map[key] = String(count);
+  try { CacheService.getScriptCache().putAll(map, CACHE_SECONDS); } catch (e) { /* the cache is best-effort */ }
 }
 
 function findGameRow_(sheet, id) {
@@ -752,6 +839,7 @@ function writeRow_(sheet, rowNumber, obj) {
     return v == null ? '' : String(v);
   });
   sheet.getRange(rowNumber, 1, 1, row.length).setNumberFormat('@').setValues([row]);
+  touch_(sheet);
   return obj;
 }
 
@@ -761,6 +849,7 @@ function ensureColumn_(sheet, name) {
   const col = sheet.getLastColumn() + 1;
   sheet.getRange(1, col).setValue(name);
   sheet.getRange(1, col, sheet.getMaxRows(), 1).setNumberFormat('@');
+  touch_(sheet);
 }
 
 function appendRow_(sheet, obj) {
@@ -781,9 +870,12 @@ function deleteProps_(prefix) {
 function withLock_(fn) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw apiError_('The Sheet is busy. Try again in a moment.', 'server');
+  const wasFresh = FRESH_;
+  FRESH_ = true;
   try {
     return fn();
   } finally {
+    FRESH_ = wasFresh;
     lock.releaseLock();
   }
 }

@@ -180,17 +180,26 @@ export function forgetAccount(userId) {
   write(K.accounts, deviceAccounts().filter((a) => a.id !== userId));
 }
 
-async function startSession({ token, user }, pin) {
+async function startSession({ token, user, friends, games }, pin) {
   state.session = { token, userId: user.id };
   write(K.session, state.session);
   loadAccount(user.id);
   state.me = tidy(user);
   rememberAccount(state.me);
+  // Sign-in already brought your friends and games, so the dashboard shows at once with no second
+  // round trip. (Older servers don't send them; then the sync below fetches them.)
+  const haveData = Array.isArray(friends) && Array.isArray(games);
+  if (haveData) {
+    Object.assign(state, { friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
+    rebuild();
+    decideMode();
+    pickRival();
+  }
   // Local hash so "Require PIN on open" works offline. It's tied to this session's token.
   setPrefs({ pinHash: await sha256(`${token}:${pin}`) });
   persistCache();
   emit({ session: true });
-  sync();
+  if (!haveData || outbox.length) sync();
 }
 
 export async function signIn(username, pin) {
@@ -198,7 +207,21 @@ export async function signIn(username, pin) {
 }
 
 export async function signUp(username, displayName, pin) {
-  await startSession(await api.signUp(username, displayName, pin), pin);
+  let result;
+  try {
+    result = await api.signUp(username, displayName, pin);
+  } catch (err) {
+    if (err.code !== 'timeout') throw err;
+    // Google didn't answer, but the account may have been created anyway. Signing in tells us;
+    // if it wasn't, try creating it once more.
+    try {
+      result = await api.signIn(username, pin);
+    } catch (e) {
+      if (e.code !== 'auth') throw e;
+      result = await api.signUp(username, displayName, pin);
+    }
+  }
+  await startSession(result, pin);
 }
 
 export async function verifyLocalPin(pin) {
@@ -374,13 +397,28 @@ export function sync() {
   return running;
 }
 
+/** Profile, friends and games in one request. Falls back to three if the server predates bootstrap. */
+let oldServer = false;
+async function fetchAll(token) {
+  if (!oldServer) {
+    try {
+      return await api.bootstrap(token);
+    } catch (err) {
+      if (!(err.code === 'invalid' && /Unknown action/.test(err.message))) throw err;
+      oldServer = true;
+    }
+  }
+  const [me, friends, games] = await Promise.all([api.getMe(token), api.getFriends(token), api.getGames(token)]);
+  return { me, friends, games };
+}
+
 async function syncOnce() {
   const session = state.session;
   setStatus('syncing');
   try {
     const hadPending = outbox.length > 0;
     await flush();
-    const [me, friends, games] = await Promise.all([api.getMe(session.token), api.getFriends(session.token), api.getGames(session.token)]);
+    const { me, friends, games } = await fetchAll(session.token);
     if (state.session !== session) return; // signed out while this was in flight
     Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
     rememberAccount(me);
@@ -396,6 +434,9 @@ async function syncOnce() {
       signOut({ expired: true });
       setStatus('idle');
     } else if (err.code === 'network') setStatus('offline', err.message);
+    // Google was slow on a routine refresh: keep showing what we have; the next poll tries again.
+    // Only flag it when there are changes waiting to be saved.
+    else if (err.code === 'timeout' && !outbox.length) setStatus('idle');
     else setStatus('error', err.message);
   }
 }
@@ -405,10 +446,15 @@ let timer = null;
 export function startAutoSync() {
   clearInterval(timer);
   timer = setInterval(() => document.visibilityState === 'visible' && sync(), CONFIG.POLL_SECONDS * 1000);
-  sync();
+  syncIfStale();
+}
+
+/** Sync unless we got fresh data in the last 10 seconds (e.g. from signing in) and nothing is waiting to save. */
+function syncIfStale() {
+  if (!state.lastSynced || Date.now() - Date.parse(state.lastSynced) > 10000 || outbox.length) sync();
 }
 window.addEventListener('online', () => sync());
-document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && sync());
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && syncIfStale());
 
 // Last, so everything above (prefs, game mode) is defined before the cached account loads
 if (state.session) loadAccount(state.session.userId);

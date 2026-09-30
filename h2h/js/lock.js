@@ -390,6 +390,11 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
   const submit = async () => {
     busy = true;
     dotRow.classList.add('is-checking');
+    // Google Sheets can take a while: say so, so a slow answer doesn't look like a frozen app
+    const slow = [
+      setTimeout(() => !msg.textContent && (msg.textContent = 'Checking…'), 1500),
+      setTimeout(() => (msg.textContent = 'Still working. Google Sheets is slow right now…'), 7000),
+    ];
     try {
       const result = await onPin(digits);
       if (result === 'done') {
@@ -404,9 +409,13 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
       } else if (err.code === 'auth') {
         fail(err.triesLeft ? `Wrong username or PIN. ${err.triesLeft} ${err.triesLeft === 1 ? 'try' : 'tries'} left.` : err.message);
       } else if (err.code === 'network') {
-        fail('Can’t reach the Sheet. Check your connection.');
+        fail('You’re offline. Check your connection.');
+      } else if (err.code === 'timeout') {
+        fail('Google Sheets didn’t answer in time. Please try again.');
       } else fail(err.message);
     } finally {
+      slow.forEach(clearTimeout);
+      if (/^(Checking…|Still working)/.test(msg.textContent)) msg.textContent = '';
       busy = false;
       dotRow.classList.remove('is-checking');
     }

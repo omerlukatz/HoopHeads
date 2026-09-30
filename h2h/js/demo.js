@@ -112,6 +112,11 @@ export function createDemoBackend(ApiError) {
   const blockedEitherWay = (s, id) => (s.blocks || []).filter((b) => b.blocker === id || b.blocked === id).map((b) => (b.blocker === id ? b.blocked : b.blocker));
   const unfriend = (s, a, b) => (s.friendships = s.friendships.filter((f) => !((f.user_a === a && f.user_b === b) || (f.user_a === b && f.user_b === a))));
   const friendIds = (s, id) => s.friendships.filter((f) => f.user_a === id || f.user_b === id).map((f) => (f.user_a === id ? f.user_b : f.user_a));
+  // What the app needs after sign-in and on every sync: friends and games (like the server's bootstrap_)
+  const snapshot = (s, id) => ({
+    friends: s.users.filter((u) => friendIds(s, id).includes(u.id)).map(pub),
+    games: s.games.filter((g) => !g.deleted && (g.player1_id === id || g.player2_id === id)),
+  });
   const clean = (g) => Object.fromEntries(Object.entries(g).filter(([k]) => !k.startsWith('_')));
   const session = (s, userId) => {
     const token = uuid();
@@ -135,7 +140,7 @@ export function createDemoBackend(ApiError) {
       s.users.push(user);
       const token = session(s, id);
       save(s);
-      return { token, user: pub(user) };
+      return { token, user: pub(user), friends: [], games: [] };
     },
 
     async signIn(username, pin) {
@@ -158,7 +163,14 @@ export function createDemoBackend(ApiError) {
       delete s.fails[name];
       const token = session(s, user.id);
       save(s);
-      return { token, user: pub(user) };
+      return { token, user: pub(user), ...snapshot(s, user.id) };
+    },
+
+    async bootstrap(token) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      return { me: pub(user), ...snapshot(s, user.id) };
     },
 
     async signOut(token) {

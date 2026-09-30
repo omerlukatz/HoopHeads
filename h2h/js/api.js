@@ -1,7 +1,8 @@
 // The only module that talks to the backend. Both backends expose the same interface:
-//   signUp(username, displayName, pin)  -> { token, user }
-//   signIn(username, pin)               -> { token, user }
+//   signUp(username, displayName, pin)  -> { token, user, friends, games }
+//   signIn(username, pin)               -> { token, user, friends, games }
 //   signOut(token)                      -> {}
+//   bootstrap(token)                    -> { me, friends, games } (one request; what sync uses)
 //   getMe(token)                        -> user
 //   getFriends(token)                   -> [user]
 //   searchUsers(token, query)           -> [user & { isFriend }]
@@ -18,7 +19,9 @@
 //   updateGame(token, game)             -> game    (also used to un-delete)
 //   deleteGame(token, id)               -> { id }  (soft delete)
 // A user is { id, username, display_name, color, initial }.
-// Failures throw ApiError with code: 'network' | 'auth' | 'locked' | 'taken' | 'wrong_pin' | 'invalid' | 'server'.
+// Failures throw ApiError with code: 'network' | 'timeout' | 'auth' | 'locked' | 'taken' | 'wrong_pin' | 'invalid' | 'server'.
+// 'network' means this device is offline; 'timeout' means Google didn't answer in time (the Sheet
+// is online but slow), which call() retries automatically first.
 import { CONFIG } from '../config.js';
 import * as demo from './demo.js';
 
@@ -32,9 +35,16 @@ export class ApiError extends Error {
   }
 }
 
-const TIMEOUT_MS = 20000;
+const TIMEOUT_MS = 25000;
+const RETRY_DELAYS = [700, 2000]; // ms before each retry
 
-async function call(method, params) {
+// Apps Script answers every request with a redirect to a googleusercontent.com page holding the
+// result. When Google is slow, that page sometimes comes back as a 404 (an HTML page without CORS
+// headers, so fetch just fails) or never arrives. Those are worth retrying; real answers aren't.
+const isTransient = (err) => err.code === 'timeout';
+
+async function attempt(method, params) {
+  if (!navigator.onLine) throw new ApiError('You’re offline.', 'network');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res;
@@ -56,30 +66,50 @@ async function call(method, params) {
       });
     }
   } catch {
-    throw new ApiError('You’re offline or the Sheet can’t be reached.', 'network');
-  } finally {
     clearTimeout(timer);
+    if (!navigator.onLine) throw new ApiError('You’re offline.', 'network');
+    throw new ApiError('Google Sheets didn’t answer. Try again in a moment.', 'timeout');
   }
   let json;
   try {
     json = await res.json();
   } catch {
-    // Usually a Google sign-in page: the deployment isn't set to "Anyone"
-    throw new ApiError('The Sheet returned an unexpected response. Check the deployment settings in SETUP.md.', 'server');
+    throw new ApiError('Google Sheets didn’t answer. Try again in a moment.', 'timeout');
+  } finally {
+    clearTimeout(timer);
   }
   if (!json.ok) throw new ApiError(json.error || 'Something went wrong.', json.code || 'server', json);
   return json.data;
 }
 
+/**
+ * One request, retried when Google is slow: reads up to twice, actions (sign in, save a game…) once,
+ * so you're never left waiting too long. `retry: false` for requests that aren't safe to repeat.
+ */
+async function call(method, params, { retry = true } = {}) {
+  const retries = method === 'GET' ? RETRY_DELAYS.length : 1;
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt(method, params);
+    } catch (err) {
+      if (!retry || !isTransient(err) || i >= retries) throw err;
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[i]));
+    }
+  }
+}
+
 const remote = {
-  signUp: (username, displayName, pin) => call('POST', { action: 'signUp', username, displayName, pin }),
+  // Not retried here: if the first try reached the Sheet, a second would say "username taken".
+  // store.signUp checks by signing in instead.
+  signUp: (username, displayName, pin) => call('POST', { action: 'signUp', username, displayName, pin }, { retry: false }),
   signIn: (username, pin) => call('POST', { action: 'signIn', username, pin }),
   signOut: (token) => call('POST', { action: 'signOut', token }),
+  bootstrap: (token) => call('GET', { action: 'bootstrap', token }),
   getMe: (token) => call('GET', { action: 'me', token }),
   getFriends: (token) => call('GET', { action: 'friends', token }),
   searchUsers: (token, q) => call('GET', { action: 'search', token, q }),
   updateProfile: (token, { username, displayName, avatar } = {}) => call('POST', { action: 'updateProfile', token, username, displayName, avatar }),
-  changePin: (token, currentPin, newPin) => call('POST', { action: 'changePin', token, currentPin, newPin }),
+  changePin: (token, currentPin, newPin) => call('POST', { action: 'changePin', token, currentPin, newPin }, { retry: false }),
   addFriend: (token, userId) => call('POST', { action: 'addFriend', token, userId }),
   removeFriend: (token, userId) => call('POST', { action: 'removeFriend', token, userId }),
   blockUser: (token, userId) => call('POST', { action: 'blockUser', token, userId }),
@@ -94,5 +124,5 @@ const remote = {
 
 const backend = isDemo ? demo.createDemoBackend(ApiError) : remote;
 
-export const { signUp, signIn, signOut, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame } = backend;
+export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame } = backend;
 export const demoControls = isDemo ? demo.controls : null;

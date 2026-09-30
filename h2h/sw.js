@@ -1,7 +1,7 @@
-// Service worker: network-first for the app shell (always fresh when online, works offline),
-// cache-first for logos and icons (they never change between releases).
+// Service worker: the app shell opens from the cache instantly and refreshes in the background;
+// logos, crests, avatars and icons are cache-first (they never change between releases).
 // Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v22';
+const VERSION = 'h2h-v23';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'css/tokens.css', 'css/app.css',
@@ -14,7 +14,9 @@ const LOGOS = TEAMS.map((t) => `assets/logos/${t}.webp`);
 const AVATARS = Array.from({ length: 20 }, (_, i) => `assets/avatars/a${String(i + 1).padStart(2, '0')}.webp`);
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll([...SHELL, ...LOGOS, ...AVATARS])).then(() => self.skipWaiting()));
+  // `reload` skips the browser's HTTP cache so a new release never installs yesterday's files
+  const fresh = (url) => new Request(url, { cache: 'reload' });
+  event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll([...SHELL.map(fresh), ...LOGOS, ...AVATARS])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -40,14 +42,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Revalidate with the server so a fresh deploy is never masked by the browser's HTTP cache
+  // App shell: answer from the cache at once (fast opens, works offline) and refresh the cached copy
+  // in the background. `no-cache` revalidates with the server so a new release is picked up; a
+  // release also bumps VERSION, which installs a fresh cache. Uncached files go to the network.
   const fresh = request.mode === 'navigate' ? new Request(request.url, { cache: 'no-cache' }) : new Request(request, { cache: 'no-cache' });
+  const update = fetch(fresh).then(async (res) => {
+    if (res.ok) await (await caches.open(VERSION)).put(request, res.clone());
+    return res;
+  });
+  event.waitUntil(update.catch(() => {})); // keep the worker alive until the cache is refreshed
   event.respondWith(
-    fetch(fresh)
-      .then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(request, copy)); }
-        return res;
-      })
-      .catch(() => caches.match(request).then((hit) => hit || (request.mode === 'navigate' ? caches.match('index.html') : undefined))),
+    caches.match(request).then((hit) => hit || update.catch(() => (request.mode === 'navigate' ? caches.match('index.html') : undefined))),
   );
 });
