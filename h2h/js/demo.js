@@ -44,6 +44,10 @@ function load() {
     fails: {},
     sample: true,
   };
+  // One open request so the Notifications bell has something to show: Sam asks Alex to delete
+  // their most recent 2K game.
+  const target = fresh.games.find((g) => g.player1_id === 'u_alex' && g.player2_id === 'u_sam' && g.sport !== 'fifa');
+  if (target) fresh.requests = [{ id: 'req-demo-1', game_id: target.id, from_id: 'u_sam', to_id: 'u_alex', kind: 'delete', game: null, status: 'pending', created_at: now, resolved_at: '' }];
   save(fresh);
   return fresh;
 }
@@ -112,11 +116,30 @@ export function createDemoBackend(ApiError) {
   const blockedEitherWay = (s, id) => (s.blocks || []).filter((b) => b.blocker === id || b.blocked === id).map((b) => (b.blocker === id ? b.blocked : b.blocker));
   const unfriend = (s, a, b) => (s.friendships = s.friendships.filter((f) => !((f.user_a === a && f.user_b === b) || (f.user_a === b && f.user_b === a))));
   const friendIds = (s, id) => s.friendships.filter((f) => f.user_a === id || f.user_b === id).map((f) => (f.user_a === id ? f.user_b : f.user_a));
-  // What the app needs after sign-in and on every sync: friends and games (like the server's bootstrap_)
+  // What the app needs after sign-in and on every sync (like the server's bootstrap_)
+  const since = () => new Date(Date.now() - 14 * 86400000).toISOString();
   const snapshot = (s, id) => ({
     friends: s.users.filter((u) => friendIds(s, id).includes(u.id)).map(pub),
     games: s.games.filter((g) => !g.deleted && (g.player1_id === id || g.player2_id === id)),
+    requests: (s.requests || []).filter(
+      (r) => (r.from_id === id || r.to_id === id) && (r.status === 'pending' || (['approved', 'declined'].includes(r.status) && r.resolved_at >= since())),
+    ),
   });
+  /** Your PIN, with the wrong-PIN lockout. Throws wrong_pin / locked. */
+  const checkPin = async (s, user, pin) => {
+    const f = s.fails[user.username] || { count: 0, lockedUntil: 0 };
+    if (f.lockedUntil > Date.now()) throw new ApiError('Too many attempts.', 'locked', { retryAfter: Math.ceil((f.lockedUntil - Date.now()) / 1000) });
+    const expected = user.pin_hash || (await sha256(`${SALT}:${user.id}:${user.seed_pin}`));
+    if (!/^\d{4}$/.test(String(pin)) || (await sha256(`${SALT}:${user.id}:${pin}`)) !== expected) {
+      f.count += 1;
+      if (f.count >= MAX_TRIES) Object.assign(f, { count: 0, lockedUntil: Date.now() + LOCK_MS });
+      s.fails[user.username] = f;
+      save(s);
+      if (f.lockedUntil > Date.now()) throw new ApiError('Too many attempts.', 'locked', { retryAfter: LOCK_MS / 1000 });
+      throw new ApiError('That PIN is wrong.', 'wrong_pin', { triesLeft: MAX_TRIES - f.count });
+    }
+    delete s.fails[user.username];
+  };
   const clean = (g) => Object.fromEntries(Object.entries(g).filter(([k]) => !k.startsWith('_')));
   const session = (s, userId) => {
     const token = uuid();
@@ -368,6 +391,96 @@ export function createDemoBackend(ApiError) {
       if (g && (g.player1_id === user.id || g.player2_id === user.id)) Object.assign(g, { deleted: true, updated_at: new Date().toISOString() });
       save(s);
       return { id };
+    },
+
+    // ----- change requests (same rules as the server) -----
+
+    async requestChange(token, { kind, game, id }) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      s.requests ||= [];
+      const gameId = kind === 'edit' ? game?.id : id;
+      const prev = s.games.find((x) => x.id === gameId && !x.deleted);
+      if (!prev) throw new ApiError('That game no longer exists.', 'invalid');
+      if (prev.player1_id !== user.id && prev.player2_id !== user.id) throw new ApiError('You can only change your own games.', 'invalid');
+      if (kind === 'edit') {
+        const err = validateGame(clean(game), user.id, friendIds(s, user.id));
+        if (err) throw new ApiError(err, 'invalid');
+      }
+      const open = s.requests.filter((r) => r.game_id === gameId && r.status === 'pending');
+      if (open.some((r) => r.from_id !== user.id)) throw new ApiError('Your friend already asked to change this game. Answer that first in Notifications.', 'invalid');
+      const request = {
+        id: open[0]?.id || uuid(),
+        game_id: gameId,
+        from_id: user.id,
+        to_id: prev.player1_id === user.id ? prev.player2_id : prev.player1_id,
+        kind,
+        game: kind === 'edit' ? clean(game) : null,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        resolved_at: '',
+      };
+      s.requests = [...s.requests.filter((r) => r.id !== request.id), request];
+      save(s);
+      return request;
+    },
+
+    async respondRequest(token, requestId, approve) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const r = (s.requests || []).find((x) => x.id === requestId);
+      if (!r || r.status !== 'pending') throw new ApiError('This request was already answered or cancelled.', 'invalid');
+      if (r.to_id !== user.id) throw new ApiError('Only your friend can answer this request.', 'invalid');
+      const now = new Date().toISOString();
+      if (approve) {
+        const g = s.games.find((x) => x.id === r.game_id);
+        if (!g) throw new ApiError('That game no longer exists.', 'invalid');
+        if (r.kind === 'delete') Object.assign(g, { deleted: true, updated_at: now });
+        else Object.assign(g, { ...r.game, created_by: g.created_by, created_at: g.created_at, updated_at: now, deleted: false });
+      }
+      Object.assign(r, { status: approve ? 'approved' : 'declined', resolved_at: now });
+      save(s);
+      return {};
+    },
+
+    async cancelRequest(token, requestId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const r = (s.requests || []).find((x) => x.id === requestId);
+      if (r && r.status === 'pending') {
+        if (r.from_id !== user.id) throw new ApiError('Only the person who asked can cancel this.', 'invalid');
+        Object.assign(r, { status: 'cancelled', resolved_at: new Date().toISOString() });
+        save(s);
+      }
+      return {};
+    },
+
+    // ----- account deletion -----
+
+    async verifyPin(token, pin) {
+      await net();
+      const s = load();
+      await checkPin(s, me(s, token), pin);
+      return {};
+    },
+
+    async deleteAccount(token, pin) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      await checkPin(s, user, pin);
+      const id = user.id;
+      s.friendships = s.friendships.filter((f) => f.user_a !== id && f.user_b !== id);
+      s.blocks = (s.blocks || []).filter((b) => b.blocker !== id && b.blocked !== id);
+      s.requests = (s.requests || []).filter((r) => r.from_id !== id && r.to_id !== id);
+      s.games.forEach((g) => (g.player1_id === id || g.player2_id === id) && Object.assign(g, { deleted: true }));
+      s.users = s.users.filter((u) => u.id !== id);
+      for (const [t, uid] of Object.entries(s.sessions)) if (uid === id) delete s.sessions[t];
+      save(s);
+      return {};
     },
   };
 }

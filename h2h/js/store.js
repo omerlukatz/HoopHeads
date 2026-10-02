@@ -43,6 +43,7 @@ export const state = {
   status: 'idle', // 'idle' | 'syncing' | 'offline' | 'error'
   error: null,
   mode: '2k', // '2k' | 'fifa': which game's stats the app shows (see decideMode)
+  requests: [], // edit/delete requests to or from you (see requestEdit / respondRequest)
 };
 let outbox = [];
 
@@ -69,6 +70,7 @@ function loadAccount(userId) {
   state.friends = (c.friends || []).map(tidy);
   state.rivalId = c.rivalId || null;
   state.serverGames = c.games || [];
+  state.requests = c.requests || [];
   state.loaded = Array.isArray(c.games);
   state.lastSynced = c.lastSynced || null;
   outbox = read(K.outbox(userId), []);
@@ -85,6 +87,7 @@ function persistCache() {
     friends: state.friends,
     rivalId: state.rivalId,
     games: state.serverGames,
+    requests: state.requests,
     lastSynced: state.lastSynced,
   });
 }
@@ -180,7 +183,7 @@ export function forgetAccount(userId) {
   write(K.accounts, deviceAccounts().filter((a) => a.id !== userId));
 }
 
-async function startSession({ token, user, friends, games }, pin) {
+async function startSession({ token, user, friends, games, requests = [] }, pin) {
   state.session = { token, userId: user.id };
   write(K.session, state.session);
   loadAccount(user.id);
@@ -190,7 +193,7 @@ async function startSession({ token, user, friends, games }, pin) {
   // round trip. (Older servers don't send them; then the sync below fetches them.)
   const haveData = Array.isArray(friends) && Array.isArray(games);
   if (haveData) {
-    Object.assign(state, { friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
+    Object.assign(state, { friends: friends.map(tidy), serverGames: games, requests, lastSynced: now(), loaded: true });
     rebuild();
     decideMode();
     pickRival();
@@ -229,14 +232,15 @@ export async function verifyLocalPin(pin) {
   return Boolean(state.session && pinHash && pinHash === (await sha256(`${state.session.token}:${pin}`)));
 }
 
-export function signOut({ expired = false } = {}) {
-  if (state.session && !expired) api.signOut(state.session.token).catch(() => {});
+/** `local`: the server already ended the session (e.g. the account was deleted), so don't call it. */
+export function signOut({ expired = false, local = false, deleted = false } = {}) {
+  if (state.session && !expired && !local) api.signOut(state.session.token).catch(() => {});
   state.session = null;
-  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], loaded: false, lastSynced: null, status: 'idle', error: null });
+  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], requests: [], loaded: false, lastSynced: null, status: 'idle', error: null });
   outbox = [];
   localStorage.removeItem(K.session);
   setPrefs({ pinHash: null });
-  emit({ session: true, expired });
+  emit({ session: true, expired, deleted });
 }
 
 /** Change name, username and/or avatar. Needs a connection. */
@@ -304,6 +308,60 @@ export async function getProfile(userId) {
   const p = { ...raw, user: tidy(raw.user), opponents: raw.opponents.map(tidy) };
   profiles.set(userId, p);
   return p;
+}
+
+// ---------- change requests ----------
+// A saved game can only be edited or deleted with the other player's OK. These need a connection.
+
+/** True for a game you logged that hasn't reached the Sheet yet: you can still change it freely. */
+export const isLocalOnly = (id) => outbox.some((op) => op.id === id && op.isNew);
+
+/** The open request for a game, if any. */
+export const pendingRequestFor = (gameId) => state.requests.find((r) => r.game_id === gameId && r.status === 'pending') || null;
+
+async function afterRequest(promise) {
+  const result = await promise;
+  await sync(); // pull the new request list (and the changed game, when approved)
+  return result;
+}
+export const requestEdit = (game) => afterRequest(api.requestChange(state.session.token, { kind: 'edit', game }));
+export const requestDelete = (id) => afterRequest(api.requestChange(state.session.token, { kind: 'delete', id }));
+export const respondRequest = (requestId, approve) => afterRequest(api.respondRequest(state.session.token, requestId, approve));
+export const cancelRequest = (requestId) => afterRequest(api.cancelRequest(state.session.token, requestId));
+
+/** Notifications: requests waiting on you, plus answers to your requests you haven't seen yet. */
+export function notifications() {
+  const me = state.session?.userId;
+  const seen = (getPrefs().notificationsSeen || {})[me] || ''; // per account: several can share a phone
+  const incoming = state.requests.filter((r) => r.to_id === me && r.status === 'pending');
+  const outgoing = state.requests.filter((r) => r.from_id === me && r.status === 'pending');
+  const answered = state.requests
+    .filter((r) => r.from_id === me && (r.status === 'approved' || r.status === 'declined'))
+    .sort((a, b) => b.resolved_at.localeCompare(a.resolved_at));
+  const unseenAnswers = answered.filter((r) => r.resolved_at > seen).length;
+  return { incoming, outgoing, answered, badge: incoming.length + unseenAnswers };
+}
+export function markNotificationsSeen() {
+  const seen = getPrefs().notificationsSeen;
+  setPrefs({ notificationsSeen: { ...(seen && typeof seen === 'object' ? seen : {}), [state.session.userId]: now() } });
+}
+
+// ---------- delete account ----------
+
+export const verifyPin = (pin) => api.verifyPin(state.session.token, pin);
+
+export async function deleteAccount(pin) {
+  try {
+    await api.deleteAccount(state.session.token, pin);
+  } catch (err) {
+    // A retry after the delete already went through finds the session gone: that's success
+    if (err.code !== 'auth') throw err;
+  }
+  const id = state.session.userId;
+  forgetAccount(id);
+  localStorage.removeItem(K.cache(id));
+  localStorage.removeItem(K.outbox(id));
+  signOut({ local: true, deleted: true }); // the server already ended every session
 }
 
 // ---------- writes (optimistic) ----------
@@ -409,7 +467,7 @@ async function fetchAll(token) {
     }
   }
   const [me, friends, games] = await Promise.all([api.getMe(token), api.getFriends(token), api.getGames(token)]);
-  return { me, friends, games };
+  return { me, friends, games, requests: [] };
 }
 
 async function syncOnce() {
@@ -418,9 +476,9 @@ async function syncOnce() {
   try {
     const hadPending = outbox.length > 0;
     await flush();
-    const { me, friends, games } = await fetchAll(session.token);
+    const { me, friends, games, requests = [] } = await fetchAll(session.token);
     if (state.session !== session) return; // signed out while this was in flight
-    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, lastSynced: now(), loaded: true });
+    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, requests, lastSynced: now(), loaded: true });
     rememberAccount(me);
     rebuild();
     decideMode();

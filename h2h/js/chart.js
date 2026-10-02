@@ -93,7 +93,7 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
     </div>
     <div class="trend__hero">
       <span class="trend__value">${s.current == null ? '—' : esc(metric.fmt(s.current))}</span>
-      ${s.change != null ? `<span class="trend__delta ${changeClass}">${arrow ? `<span aria-hidden="true">${arrow}</span> ` : ''}${esc(metric.delta(s.change))}</span>` : ''}<span class="trend__phrase">${esc(s.range.phrase)}</span>
+      ${s.change != null ? `<span class="trend__delta ${changeClass}">${arrow ? `<span aria-hidden="true">${arrow}</span> ` : ''}${esc(metric.delta(s.change))}</span>` : ''}<span class="visually-hidden">${esc(s.range.phrase)}</span>
     </div>
     <p class="trend__sub">${s.settled ? `${points.length} games · from game 5` : games ? `${games} ${games === 1 ? 'game' : 'games'}` : 'No games in this period'}${s.peak != null && games ? ` · High ${esc(metric.fmt(s.peak))} · Low ${esc(metric.fmt(s.low))}` : ''}</p>
     <div class="trend__plot" data-plot>

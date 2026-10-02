@@ -7,6 +7,8 @@
  *   Users:       id, username, display_name, pin_hash, color, initial, created_at
  *   Friendships: id, user_a, user_b, created_at
  *   Blocks:      id, blocker, blocked, created_at
+ *   Requests:    id, game_id, from_id, to_id, kind (edit/delete), game (proposed JSON), status
+ *                (pending/approved/declined/cancelled), created_at, resolved_at
  *   Games:       id, date, player1_id, player2_id, player1_score, player2_score, player1_team,
  *                player2_team, overtime, note, created_by, created_at, updated_at, deleted,
  *                sport ('2k' or 'fifa'; empty = 2k), player1_pens, player2_pens (FIFA shootouts)
@@ -22,6 +24,11 @@
  *   POST { action: 'signUp', username, displayName, pin }  -> { token, user, friends, games }
  *   POST { action: 'signIn', username, pin }               -> { token, user, friends, games }
  *   POST { action: 'signOut', token }                      -> {}
+ *   POST { action: 'requestChange', token, kind, game?, id? } -> request (edit/delete waits for the other player)
+ *   POST { action: 'respondRequest', token, requestId, approve } -> {} (approve applies the change)
+ *   POST { action: 'cancelRequest', token, requestId }       -> {}
+ *   POST { action: 'verifyPin', token, pin }                  -> {} (or wrong_pin / locked)
+ *   POST { action: 'deleteAccount', token, pin }              -> {} (deletes the account; its games are hidden)
  *   POST { action: 'updateProfile', token, username?, displayName?, avatar? } -> user
  *   POST { action: 'changePin', token, currentPin, newPin }  -> { token } (other devices are signed out)
  *   POST { action: 'addFriend', token, userId }            -> friend (instant; safe to repeat)
@@ -47,6 +54,7 @@ const SHEETS = {
   Users: ['id', 'username', 'display_name', 'pin_hash', 'color', 'initial', 'created_at', 'avatar'],
   Friendships: ['id', 'user_a', 'user_b', 'created_at'],
   Blocks: ['id', 'blocker', 'blocked', 'created_at'],
+  Requests: ['id', 'game_id', 'from_id', 'to_id', 'kind', 'game', 'status', 'created_at', 'resolved_at'],
   Games: ['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score', 'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at', 'updated_at', 'deleted', 'sport', 'player1_pens', 'player2_pens'],
 };
 const TEAMS = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK', 'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS'];
@@ -216,6 +224,7 @@ function removeTestPlayers() {
     const games = removeRows(sheet_('Games'), function (g) { return isTest(g.player1_id) || isTest(g.player2_id); });
     removeRows(sheet_('Friendships'), function (f) { return isTest(f.user_a) || isTest(f.user_b); });
     removeRows(sheet_('Blocks'), function (b) { return isTest(b.blocker) || isTest(b.blocked); });
+    removeRows(sheet_('Requests'), function (r) { return isTest(r.from_id) || isTest(r.to_id); });
     ids.forEach(endSessionsFor_);
     removeRows(users, function (u) { return isTest(u.id); });
     Logger.log('Removed ' + ids.length + ' test players and ' + games + ' games.');
@@ -273,6 +282,11 @@ function doPost(e) {
       case 'unblockUser': return unblockUser_(requireSession_(body.token), body.userId);
       case 'addGame': return addGame_(requireSession_(body.token), body.game);
       case 'updateGame': return updateGame_(requireSession_(body.token), body.game);
+      case 'requestChange': return requestChange_(requireSession_(body.token), body.kind, body.game, body.id);
+      case 'respondRequest': return respondRequest_(requireSession_(body.token), body.requestId, body.approve === true);
+      case 'cancelRequest': return cancelRequest_(requireSession_(body.token), body.requestId);
+      case 'verifyPin': return verifyPin_(requireSession_(body.token), body.pin);
+      case 'deleteAccount': return deleteAccount_(requireSession_(body.token), body.pin);
       case 'deleteGame': return deleteGame_(requireSession_(body.token), body.id);
       default: throw apiError_('Unknown action.', 'invalid');
     }
@@ -310,7 +324,7 @@ function signUp_(username, displayName, pin) {
       created_at: new Date().toISOString(),
     };
     appendRow_(sheet_('Users'), user);
-    return { token: newSession_(id), user: publicUser_(user), friends: [], games: [] };
+    return { token: newSession_(id), user: publicUser_(user), friends: [], games: [], requests: [] };
   });
 }
 
@@ -340,12 +354,12 @@ function signIn_(username, pin) {
   // Everything the app needs to show the dashboard straight away (read outside the lock)
   const data = bootstrap_(result.user);
   if (Math.random() < 0.05) pruneSessions_(); // tidy expired sessions now and then, not on every sign-in
-  return { token: result.token, user: data.me, friends: data.friends, games: data.games };
+  return { token: result.token, user: data.me, friends: data.friends, games: data.games, requests: data.requests };
 }
 
 /** Your profile, friends and games in one response: one execution instead of three. */
 function bootstrap_(me) {
-  return { me: publicUser_(me), friends: listFriends_(me.id), games: listGames_(me.id) };
+  return { me: publicUser_(me), friends: listFriends_(me.id), games: listGames_(me.id), requests: listRequests_(me.id) };
 }
 
 function updateProfile_(me, username, displayName, avatar) {
@@ -628,36 +642,173 @@ function addGame_(me, game) {
   });
 }
 
+// Saved games can't be changed directly any more: edits and deletes go through requestChange_ and
+// the other player's approval. (Kept so old versions of the app get a clear message.)
 function updateGame_(me, game) {
-  return withLock_(function () {
-    const clean = cleanGame_(game, me);
-    const sheet = sheet_('Games');
-    ['sport', 'player1_pens', 'player2_pens'].forEach(function (c) { ensureColumn_(sheet, c); }); // added with FIFA
-    const existing = findGameRow_(sheet, clean.id);
-    if (!existing) throw apiError_('That game no longer exists.', 'invalid');
-    const prev = normalizeGame_(existing.data);
-    assertPlayedIn_(prev, me);
-    const samePair = [prev.player1_id, prev.player2_id].sort().join() === [clean.player1_id, clean.player2_id].sort().join();
-    if (!samePair) throw apiError_('A game can’t be moved to different players.', 'invalid');
-    return writeRow_(sheet, existing.row, Object.assign(clean, {
-      created_by: prev.created_by,
-      created_at: prev.created_at,
-      updated_at: new Date().toISOString(),
-      deleted: game.deleted === true,
-    }));
-  });
+  throw apiError_('Changes now need your friend’s approval. Close and reopen the app to update it.', 'invalid');
 }
 
 function deleteGame_(me, id) {
+  throw apiError_('Deleting now needs your friend’s approval. Close and reopen the app to update it.', 'invalid');
+}
+
+/* =====================================================================
+ * CHANGE REQUESTS: editing or deleting a saved game needs the other player to approve
+ * ===================================================================== */
+
+const REQUEST_DAYS = 14; // answered requests stay visible (as notifications) this long
+
+function requestChange_(me, kind, game, id) {
+  if (kind !== 'edit' && kind !== 'delete') throw apiError_('Unknown change.', 'invalid');
   return withLock_(function () {
-    const sheet = sheet_('Games');
-    const existing = findGameRow_(sheet, id);
-    if (existing) {
-      const g = normalizeGame_(existing.data);
-      assertPlayedIn_(g, me);
-      writeRow_(sheet, existing.row, Object.assign(g, { deleted: true, updated_at: new Date().toISOString() }));
+    const gameId = String(kind === 'edit' ? (game && game.id) || '' : id || '');
+    const existing = findGameRow_(sheet_('Games'), gameId);
+    if (!existing) throw apiError_('That game no longer exists.', 'invalid');
+    const prev = normalizeGame_(existing.data);
+    if (prev.deleted) throw apiError_('That game was already deleted.', 'invalid');
+    assertPlayedIn_(prev, me);
+    const other = prev.player1_id === me.id ? prev.player2_id : prev.player1_id;
+    let proposed = '';
+    if (kind === 'edit') {
+      const clean = cleanGame_(game, me);
+      const samePair = [prev.player1_id, prev.player2_id].sort().join() === [clean.player1_id, clean.player2_id].sort().join();
+      if (!samePair) throw apiError_('A game can’t be moved to different players.', 'invalid');
+      proposed = JSON.stringify(clean);
     }
-    return { id: id };
+    const sheet = sheet_('Requests');
+    const open = readRows_(sheet).filter(function (r) { return r.data.game_id === gameId && r.data.status === 'pending'; });
+    if (open.some(function (r) { return r.data.from_id !== me.id; })) {
+      throw apiError_('Your friend already asked to change this game. Answer that first in Notifications.', 'invalid');
+    }
+    const mine = open[0]; // asking again replaces your earlier request for this game
+    const request = {
+      id: mine ? mine.data.id : Utilities.getUuid(),
+      game_id: gameId,
+      from_id: me.id,
+      to_id: other,
+      kind: kind,
+      game: proposed,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      resolved_at: '',
+    };
+    if (mine) writeRow_(sheet, mine.row, request);
+    else appendRow_(sheet, request);
+    return publicRequest_(request);
+  });
+}
+
+function respondRequest_(me, requestId, approve) {
+  return withLock_(function () {
+    const sheet = sheet_('Requests');
+    const hit = readRows_(sheet).find(function (r) { return r.data.id === requestId; });
+    if (!hit || hit.data.status !== 'pending') throw apiError_('This request was already answered or cancelled.', 'invalid');
+    if (hit.data.to_id !== me.id) throw apiError_('Only your friend can answer this request.', 'invalid');
+    const now = new Date().toISOString();
+    if (approve) {
+      const games = sheet_('Games');
+      ['sport', 'player1_pens', 'player2_pens'].forEach(function (c) { ensureColumn_(games, c); });
+      const existing = findGameRow_(games, hit.data.game_id);
+      if (!existing) throw apiError_('That game no longer exists.', 'invalid');
+      const prev = normalizeGame_(existing.data);
+      if (hit.data.kind === 'delete') {
+        writeRow_(games, existing.row, Object.assign(prev, { deleted: true, updated_at: now }));
+      } else {
+        const next = JSON.parse(hit.data.game);
+        writeRow_(games, existing.row, Object.assign(next, { created_by: prev.created_by, created_at: prev.created_at, updated_at: now, deleted: false }));
+      }
+    }
+    writeRow_(sheet, hit.row, Object.assign({}, hit.data, { status: approve ? 'approved' : 'declined', resolved_at: now }));
+    return {};
+  });
+}
+
+function cancelRequest_(me, requestId) {
+  return withLock_(function () {
+    const sheet = sheet_('Requests');
+    const hit = readRows_(sheet).find(function (r) { return r.data.id === requestId; });
+    if (!hit || hit.data.status !== 'pending') return {};
+    if (hit.data.from_id !== me.id) throw apiError_('Only the person who asked can cancel this.', 'invalid');
+    writeRow_(sheet, hit.row, Object.assign({}, hit.data, { status: 'cancelled', resolved_at: new Date().toISOString() }));
+    return {};
+  });
+}
+
+/** Open requests to or from you, plus ones answered in the last two weeks (shown as notifications). */
+function listRequests_(userId) {
+  const since = new Date(Date.now() - REQUEST_DAYS * 86400000).toISOString();
+  return readObjects_('Requests')
+    .filter(function (r) {
+      if (r.from_id !== userId && r.to_id !== userId) return false;
+      if (r.status === 'pending') return true;
+      return (r.status === 'approved' || r.status === 'declined') && String(r.resolved_at) >= since;
+    })
+    .map(publicRequest_);
+}
+
+function publicRequest_(r) {
+  let game = null;
+  try { game = r.game ? JSON.parse(r.game) : null; } catch (e) { game = null; }
+  const text = function (v) { return v instanceof Date ? v.toISOString() : String(v == null ? '' : v); };
+  return { id: text(r.id), game_id: text(r.game_id), from_id: text(r.from_id), to_id: text(r.to_id), kind: text(r.kind), game: game, status: text(r.status), created_at: text(r.created_at), resolved_at: text(r.resolved_at) };
+}
+
+/* =====================================================================
+ * ACCOUNT DELETION
+ * ===================================================================== */
+
+/** Checks your PIN (with the usual wrong-PIN lockout). Used before deleting your account. */
+function verifyPin_(me, pin) {
+  return withLock_(function () {
+    checkPin_(me, pin);
+    return {};
+  });
+}
+
+function checkPin_(me, pin) {
+  const props = PropertiesService.getScriptProperties();
+  const key = 'fails:' + me.username;
+  const fails = JSON.parse(props.getProperty(key) || '{"count":0,"lockedUntil":0}');
+  if (fails.lockedUntil > Date.now()) {
+    throw apiError_('Too many attempts.', 'locked', { retryAfter: Math.ceil((fails.lockedUntil - Date.now()) / 1000) });
+  }
+  if (!/^\d{4}$/.test(String(pin)) || hash_(me.id, String(pin)) !== me.pin_hash) {
+    fails.count += 1;
+    if (fails.count >= MAX_TRIES) {
+      props.setProperty(key, JSON.stringify({ count: 0, lockedUntil: Date.now() + LOCK_MINUTES * 60000 }));
+      throw apiError_('Too many attempts.', 'locked', { retryAfter: LOCK_MINUTES * 60 });
+    }
+    props.setProperty(key, JSON.stringify(fails));
+    throw apiError_('That PIN is wrong.', 'wrong_pin', { triesLeft: MAX_TRIES - fails.count });
+  }
+  props.deleteProperty(key);
+}
+
+/**
+ * Deletes your account: your user row, friendships, blocks and requests, and hides your games
+ * (soft delete, so the Sheet owner could still recover them). Signs you out everywhere.
+ */
+function deleteAccount_(me, pin) {
+  return withLock_(function () {
+    checkPin_(me, pin);
+    const now = new Date().toISOString();
+    const removeRows = function (name, test) {
+      const sheet = sheet_(name);
+      const rows = readRows_(sheet).filter(function (r) { return test(r.data); });
+      rows.reverse().forEach(function (r) { sheet.deleteRow(r.row); }); // bottom-up keeps row numbers valid
+      if (rows.length) touch_(sheet);
+    };
+    removeRows('Friendships', function (f) { return f.user_a === me.id || f.user_b === me.id; });
+    removeRows('Blocks', function (b) { return b.blocker === me.id || b.blocked === me.id; });
+    removeRows('Requests', function (r) { return r.from_id === me.id || r.to_id === me.id; });
+    const games = sheet_('Games');
+    readRows_(games).forEach(function (r) {
+      const g = normalizeGame_(r.data);
+      if (!g.deleted && (g.player1_id === me.id || g.player2_id === me.id)) writeRow_(games, r.row, Object.assign(g, { deleted: true, updated_at: now }));
+    });
+    removeRows('Users', function (u) { return u.id === me.id; });
+    endSessionsFor_(me.id);
+    return {};
   });
 }
 
@@ -740,7 +891,15 @@ function normalizeGame_(r) {
  * ===================================================================== */
 
 function sheet_(name) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(name);
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet && name === 'Requests') {
+    // Added after launch: create it the first time it's needed instead of asking you to run setupSheet
+    sheet = ss.insertSheet(name);
+    sheet.appendRow(SHEETS[name]);
+    sheet.getRange(1, 1, sheet.getMaxRows(), SHEETS[name].length).setNumberFormat('@');
+    sheet.setFrozenRows(1);
+  }
   if (!sheet) throw apiError_('The "' + name + '" tab is missing. Run setupSheet in the script editor.', 'server');
   return sheet;
 }

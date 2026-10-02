@@ -83,7 +83,7 @@
         <ul class="sidebar__nav" role="list">
           <li><a href="#dashboard" data-nav="dashboard"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dashboard"/></svg>Dashboard</a></li>
           <li><a href="#history" data-nav="history"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history"/></svg>History</a></li>
-          <li><a href="#friends" data-nav="friends"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg>Friends</a></li>
+          <li><a href="#friends" data-nav="friends"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg>Friends<span class="tab__dot" data-bell-dot hidden></span></a></li>
           <li><a href="#settings" data-nav="settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-settings"/></svg>Settings</a></li>
         </ul>
       </nav>
@@ -112,7 +112,8 @@
       <section class="screen" data-screen="friends" aria-labelledby="t-friends" inert>
         <header class="navbar">
           <button type="button" class="navbar__back" id="friend-back"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.75-6.25 6.25 6.25 6.25"/></svg>Friends</button>
-          <span class="navbar__title" aria-hidden="true" id="friends-navtitle">Friends</span><span class="navbar__trailing" data-sync></span>
+          <span class="navbar__title" aria-hidden="true" id="friends-navtitle">Friends</span>
+          <span class="navbar__trailing"><span data-sync></span><button type="button" class="navbar__bell" data-action="notifications" aria-label="Notifications"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.25 16.75V11a5.75 5.75 0 0 1 11.5 0v5.75l1.5 2H4.75Z"/><path d="M9.75 20.25a2.25 2.25 0 0 0 4.5 0"/></svg><span class="bell__badge" data-bell-badge hidden></span></button></span>
         </header>
         <div class="scroller">
           <h1 class="large-title" id="t-friends">Friends</h1>
@@ -151,7 +152,7 @@
         <span class="tab__fab"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg></span>
       </button>
       <a href="#friends" class="tab" data-nav="friends">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-people"/></svg><span class="tab__dot" data-bell-dot hidden></span>
         <span>Friends</span>
       </a>
       <a href="#settings" class="tab" data-nav="settings">

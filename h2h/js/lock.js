@@ -231,6 +231,40 @@ function renderCreatePin(values, message = '') {
   });
 }
 
+// ---------- confirm PIN (before deleting your account) ----------
+
+/** Asks for your PIN and checks it with the server. Resolves the PIN, or null if cancelled. */
+export function confirmPinFlow({ title = 'Enter Your PIN', subtitle = '' } = {}) {
+  const el = root();
+  el.classList.add('is-shown');
+  el.getBoundingClientRect();
+  el.classList.add('is-visible');
+  document.getElementById('app').inert = true;
+  let confirmed = null;
+  const ask = (message = '') =>
+    renderPin({
+      user: store.state.me,
+      title,
+      subtitle,
+      message,
+      leave: { label: 'Cancel', fn: () => hideLock() },
+      onPin: async (pin) => {
+        try {
+          await store.verifyPin(pin);
+          confirmed = pin;
+          return 'done';
+        } catch (e) {
+          if (e.code !== 'wrong_pin') throw e;
+          haptic('warning');
+          ask(`${e.message}${e.triesLeft ? ` ${e.triesLeft} ${e.triesLeft === 1 ? 'try' : 'tries'} left.` : ''}`);
+          return 'handled';
+        }
+      },
+    });
+  ask();
+  return new Promise((resolve) => (resolveUnlock = () => resolve(confirmed)));
+}
+
 // ---------- change PIN (from Settings) ----------
 
 /** Current PIN → new PIN → confirm, checked by the server. Resolves true if the PIN changed. */

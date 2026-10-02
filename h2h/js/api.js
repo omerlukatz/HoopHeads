@@ -17,7 +17,13 @@
 //   getGames(token)                     -> [game]  (every non-deleted game you played in)
 //   addGame(token, game)                -> game    (idempotent by id, safe to retry)
 //   updateGame(token, game)             -> game    (also used to un-delete)
-//   deleteGame(token, id)               -> { id }  (soft delete)
+//   deleteGame(token, id)               -> { id }  (soft delete; saved games now go through requestChange)
+//   requestChange(token, { kind, game?, id? }) -> request (edit/delete a saved game; the other player approves)
+//   respondRequest(token, requestId, approve)  -> {}  (approving applies the change)
+//   cancelRequest(token, requestId)     -> {}
+//   verifyPin(token, pin)               -> {}      (wrong_pin / locked on failure)
+//   deleteAccount(token, pin)           -> {}
+// bootstrap and sign-in also return `requests`: open requests to or from you, plus recently answered ones.
 // A user is { id, username, display_name, color, initial }.
 // Failures throw ApiError with code: 'network' | 'timeout' | 'auth' | 'locked' | 'taken' | 'wrong_pin' | 'invalid' | 'server'.
 // 'network' means this device is offline; 'timeout' means Google didn't answer in time (the Sheet
@@ -120,9 +126,14 @@ const remote = {
   addGame: (token, game) => call('POST', { action: 'addGame', token, game }),
   updateGame: (token, game) => call('POST', { action: 'updateGame', token, game }),
   deleteGame: (token, id) => call('POST', { action: 'deleteGame', token, id }),
+  requestChange: (token, { kind, game, id }) => call('POST', { action: 'requestChange', token, kind, game, id }),
+  respondRequest: (token, requestId, approve) => call('POST', { action: 'respondRequest', token, requestId, approve }),
+  cancelRequest: (token, requestId) => call('POST', { action: 'cancelRequest', token, requestId }),
+  verifyPin: (token, pin) => call('POST', { action: 'verifyPin', token, pin }),
+  deleteAccount: (token, pin) => call('POST', { action: 'deleteAccount', token, pin }),
 };
 
 const backend = isDemo ? demo.createDemoBackend(ApiError) : remote;
 
-export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame } = backend;
+export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount } = backend;
 export const demoControls = isDemo ? demo.controls : null;

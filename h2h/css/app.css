@@ -2016,3 +2016,67 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .picker__country { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-headline); font-weight: 600; }
 .country .cell__stack { flex: 1; min-width: 0; }
 .picker [data-view] { display: flex; flex-direction: column; gap: var(--s2); }
+
+/* ============ Notifications ============ */
+
+.navbar__trailing { gap: 10px; }
+.navbar__bell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-right: -6px;
+  border-radius: 50%;
+  color: var(--accent);
+  -webkit-tap-highlight-color: transparent;
+}
+.navbar__bell .icon { width: 25px; height: 25px; }
+.navbar__bell:active { opacity: 0.4; }
+.navbar__bell:focus-visible { box-shadow: var(--focus); }
+.bell__badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--loss);
+  box-shadow: 0 0 0 2px var(--bg);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.tab { position: relative; }
+.tab__dot {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 8px);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--loss);
+  box-shadow: 0 0 0 2px var(--material, var(--bg));
+}
+.sidebar__nav a { position: relative; }
+.sidebar__nav a .tab__dot { position: static; margin-left: auto; box-shadow: none; }
+
+.notif { display: flex; flex-direction: column; gap: var(--s2); }
+.notif-card { padding: 14px var(--s2); background: var(--sheet-card); display: flex; flex-direction: column; gap: 10px; }
+.notif-card__head { display: flex; align-items: center; gap: 10px; }
+.notif-card__text { font-size: var(--fs-subhead); line-height: 1.35; }
+.notif-card__text strong { font-weight: 600; }
+.notif-card__time { font-size: var(--fs-caption); color: var(--label-2); }
+.notif-card .list { box-shadow: none; background: var(--fill); }
+.notif-card .row { background: transparent; min-height: 56px; }
+.notif-label { font-size: var(--fs-caption); font-weight: 600; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: -4px; }
+.notif-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.notif-card__actions .btn { min-height: 40px; }
+.notif-empty { padding: var(--s4) var(--s2); text-align: center; color: var(--label-2); }
+.notif-status--approved { color: var(--win-text); font-weight: 600; }
+.notif-status--declined { color: var(--loss-text); font-weight: 600; }
+.tag--request { color: var(--ot-text); font-weight: 600; }
+.edit-banner { padding: 10px 14px; border-radius: var(--r-control); background: var(--ot-tint); color: var(--ot-text); font-size: var(--fs-footnote); font-weight: 500; }

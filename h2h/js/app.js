@@ -4,7 +4,7 @@ import { state } from './store.js';
 import { isDemo, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, sportOf, CLUTCH_TESTS, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
-import { showLock, isLocked, avatar, AVATARS, changePinFlow } from './lock.js';
+import { showLock, isLocked, avatar, AVATARS, changePinFlow, confirmPinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -127,6 +127,7 @@ document.addEventListener('click', (e) => {
   else if (name === 'friend-options') openFriendOptions(id);
   else if (name === 'open-profile') openProfile(id);
   else if (name === 'invite') shareInvite();
+  else if (name === 'notifications') openNotifications();
 });
 
 // "N" logs a new game on desktop keyboards
@@ -215,11 +216,14 @@ function gameRow(g) {
   const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
   const byOpp = g.createdBy && g.createdBy !== meId();
   const meta = [g.shootout && decidedText(g), g.note].filter(Boolean).join(' · ');
+  const req = store.pendingRequestFor(g.id);
+  const reqText = req && (req.from_id === meId() ? (req.kind === 'delete' ? 'Delete requested' : 'Edit requested') : `${oppName()} wants to ${req.kind}`);
   const tags = [
     g.pending ? `<span class="tag tag--pending">${icon('clock')}Not synced</span>` : '',
+    req ? `<span class="tag tag--request">${esc(reqText)}</span>` : '',
     byOpp ? `<span class="tag">Logged by ${esc(oppName())}</span>` : '',
   ].join('');
-  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${resultWord(g)}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}Edit game.`;
+  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${resultWord(g)}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}${req ? `${reqText}. ` : ''}Edit game.`;
   return `<li class="row-wrap" data-id="${g.id}">
     <div class="row-clip">
       <div class="row-actions" aria-hidden="true">
@@ -379,7 +383,6 @@ function renderDashboard() {
           <span><i class="cal-key cal-key--win"></i>Won</span><span><i class="cal-key cal-key--loss"></i>Lost</span><span><i class="cal-key cal-key--split"></i>Split</span>
         </span>
       </div>
-      <p class="activity__sub">Days you played, coloured by who won the day. Dots show how many games.</p>
       <div class="activity__plot" id="activity-plot"></div>
     </section>
 
@@ -678,6 +681,14 @@ function renderSettings() {
     <p class="group__foot">You stay signed in on this device. Changing your PIN signs you out everywhere else. Turn on Require PIN to be asked for it each time the app opens.</p>
   </section>
 
+  <section class="group" aria-labelledby="set-danger">
+    <div class="group__head"><h2 id="set-danger">Delete Account</h2></div>
+    <ul class="list" role="list">
+      <li><button type="button" class="cell cell--button cell--destructive" id="delete-account-btn">Delete Account</button></li>
+    </ul>
+    <p class="group__foot">Permanently deletes your profile, friends and requests, and removes your games from your friends’ stats. You’ll need your PIN.</p>
+  </section>
+
   <section class="group" aria-labelledby="set-theme">
     <div class="group__head"><h2 id="set-theme">Theme</h2></div>
     <div class="list swatches" role="radiogroup" aria-labelledby="set-theme">
@@ -760,6 +771,7 @@ function initSettings() {
     }
     if (id === 'export-btn') exportGames();
     if (id === 'signout-btn') confirmSignOut();
+    if (id === 'delete-account-btn') deleteAccount();
     if (id === 'profile-btn') openProfileSheet();
     if (id === 'pin-btn') changePin();
     if (id === 'blocked-btn') openBlockedSheet();
@@ -856,6 +868,25 @@ function openProfileSheet() {
   });
 }
 
+/** PIN first (checked by the server), then a last "are you sure", then the account is deleted. */
+async function deleteAccount() {
+  if (!navigator.onLine) return toast('You’re offline. Deleting your account needs a connection.');
+  const pin = await confirmPinFlow({ title: 'Enter Your PIN', subtitle: 'to delete your account' });
+  if (!pin) return;
+  const ok = await alertDialog({
+    title: 'Delete your account?',
+    message: 'This permanently deletes your profile, friends and requests, and removes your games from your friends’ stats. This can’t be undone.',
+    actions: [NO, { label: 'Delete Account', value: true, style: 'destructive' }],
+  });
+  if (!ok) return;
+  try {
+    await store.deleteAccount(pin);
+  } catch (err) {
+    haptic('warning');
+    toast(err.code === 'network' ? 'You’re offline. Try again when you’re connected.' : err.message);
+  }
+}
+
 async function confirmSignOut() {
   const pending = store.pendingCount();
   const ok = await alertDialog({
@@ -896,13 +927,48 @@ async function exportGames() {
 
 // ---------- delete with undo ----------
 
-async function removeGame(id) {
+const NO = { label: 'Cancel', value: false, style: 'cancel' };
+const requestError = (err) => (err.code === 'network' ? 'You’re offline. Requests need a connection.' : err.message);
+
+/**
+ * Delete a game, after asking. A saved game is only deleted once the other player approves, so this
+ * sends them a request. A game that hasn't synced yet is just yours, so it goes straight away.
+ */
+async function removeGame(id, opponentName = oppName()) {
   haptic('medium');
   const rows = $$(`.row-wrap[data-id="${id}"]`);
-  rows.forEach((r) => r.classList.add('is-leaving'));
-  if (!reducedMotion.matches && rows.length) await new Promise((r) => setTimeout(r, 320));
-  const game = store.deleteGame(id);
-  if (game) toast('Game deleted', { action: { label: 'Undo', onClick: () => store.restoreGame(game) } });
+  const snapBack = () =>
+    rows.forEach((w) => {
+      w.classList.remove('is-open');
+      const row = $('.row', w);
+      if (row) row.style.transform = '';
+      w.style.removeProperty('--reveal');
+    });
+  if (store.isLocalOnly(id)) {
+    const ok = await alertDialog({ title: 'Delete this game?', message: 'It hasn’t synced yet, so it’s removed right away.', actions: [NO, { label: 'Delete', value: true, style: 'destructive' }] });
+    if (!ok) return snapBack();
+    rows.forEach((r) => r.classList.add('is-leaving'));
+    if (!reducedMotion.matches && rows.length) await new Promise((r) => setTimeout(r, 320));
+    const game = store.deleteGame(id);
+    if (game) toast('Game deleted', { action: { label: 'Undo', onClick: () => store.restoreGame(game) } });
+    return;
+  }
+  const mine = store.pendingRequestFor(id);
+  const ok = await alertDialog({
+    title: 'Delete this game?',
+    message: `${opponentName} has to approve before it’s removed.${mine && mine.from_id === meId() ? ' This replaces the request you already sent.' : ''}`,
+    actions: [NO, { label: 'Send Request', value: true, style: 'destructive' }],
+  });
+  snapBack();
+  if (!ok) return;
+  try {
+    await store.requestDelete(id);
+    haptic('success');
+    toast(`Sent to ${opponentName} for approval`);
+  } catch (err) {
+    haptic('warning');
+    toast(requestError(err));
+  }
 }
 
 // ---------- swipe to delete ----------
@@ -1020,6 +1086,14 @@ function openGameSheet({ id = null } = {}) {
     : { date: todayISO(), myTeam: null, oppTeam: null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' }; // new games start with both teams empty
   const opp = opponent.display_name;
   const canSwitch = !editing && state.friends.length > 1;
+  // Editing a saved game sends a request; a game that hasn't synced yet is still yours to change
+  const needsApproval = editing && !store.isLocalOnly(source.id);
+  const openReq = editing ? store.pendingRequestFor(source.id) : null;
+  const banner = !openReq
+    ? ''
+    : openReq.from_id === meId()
+      ? `You already asked ${esc(opp)} to ${openReq.kind} this game. Sending a new edit replaces that request.`
+      : `${esc(opp)} asked to ${openReq.kind} this game. <button type="button" class="link" data-sheet="review">Review in Notifications</button>`;
 
   const content = document.createElement('div');
   content.className = 'sheet__content';
@@ -1027,9 +1101,10 @@ function openGameSheet({ id = null } = {}) {
     <header class="sheet__header">
       <button type="button" class="btn-text" data-sheet="cancel">Cancel</button>
       <h2 id="game-sheet-title" class="sheet__title">${editing ? 'Edit Game' : 'New Game'}</h2>
-      <button type="submit" form="game-form" class="btn-text btn-text--strong" data-sheet="save" disabled>Save</button>
+      <button type="submit" form="game-form" class="btn-text btn-text--strong" data-sheet="save" disabled>${needsApproval ? 'Send' : 'Save'}</button>
     </header>
     <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
+      ${banner ? `<p class="edit-banner">${banner}</p>` : ''}
       <div class="matchup">
         <div class="side">
           <span class="side__name">You</span>
@@ -1061,7 +1136,7 @@ function openGameSheet({ id = null } = {}) {
         <li class="cell"><label for="g-note" class="visually-hidden">Note</label><input id="g-note" name="note" class="cell__input cell__input--full" placeholder="Note (optional)" maxlength="80" value="${esc(draft.note)}" enterkeyhint="done"></li>
       </ul>
 
-      <button type="submit" class="btn btn--primary btn--block" data-sheet="save" disabled>${editing ? 'Save Changes' : 'Save Game'}</button>
+      <button type="submit" class="btn btn--primary btn--block" data-sheet="save" disabled>${needsApproval ? `Send to ${esc(opp)} for Approval` : editing ? 'Save Changes' : 'Save Game'}</button>
       ${editing ? `<button type="button" class="btn btn--plain-destructive btn--block" data-sheet="delete">Delete Game</button>` : ''}
     </form>`;
 
@@ -1153,11 +1228,15 @@ function openGameSheet({ id = null } = {}) {
     if (act === 'cancel') sheet.close();
     if (act === 'delete') {
       sheet.close();
-      removeGame(source.id);
+      removeGame(source.id, opponent.display_name);
+    }
+    if (act === 'review') {
+      await sheet.close();
+      openNotifications();
     }
   });
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!validate()) {
       haptic('warning');
@@ -1183,6 +1262,28 @@ function openGameSheet({ id = null } = {}) {
       [`player${mine}_team`]: d.myTeam,
       [`player${theirs}_team`]: d.oppTeam,
     };
+    if (needsApproval) {
+      const ok = await alertDialog({
+        title: `Send this edit to ${opponent.display_name}?`,
+        message: `The game changes once ${opponent.display_name} approves it.`,
+        actions: [NO, { label: 'Send', value: true }],
+      });
+      if (!ok) return;
+      saveBtns.forEach((b) => (b.disabled = true));
+      hint.textContent = 'Sending…';
+      try {
+        await store.requestEdit({ ...neutral, id: source.id });
+      } catch (err) {
+        haptic('warning');
+        hint.textContent = requestError(err);
+        validate();
+        return;
+      }
+      haptic('success');
+      sheet.close();
+      toast(`Sent to ${opponent.display_name} for approval`);
+      return;
+    }
     if (editing) store.updateGame({ ...neutral, id: source.id });
     else {
       store.addGame(neutral);
@@ -1714,6 +1815,101 @@ function openClubPicker(side, current, opponent) {
   });
 }
 
+// ---------- notifications (edit / delete requests) ----------
+
+function renderBell() {
+  const { badge } = store.notifications();
+  $$('[data-bell-badge]').forEach((b) => {
+    b.hidden = !badge;
+    b.textContent = badge > 9 ? '9+' : String(badge);
+  });
+  $$('[data-bell-dot]').forEach((d) => (d.hidden = !badge));
+  $$('.navbar__bell').forEach((b) => b.setAttribute('aria-label', badge ? `Notifications, ${badge} new` : 'Notifications'));
+}
+
+function openNotifications() {
+  if (document.documentElement.classList.contains('has-modal') || !state.session) return;
+  const content = document.createElement('div');
+  content.className = 'sheet__content';
+  content.innerHTML = `
+    <header class="sheet__header">
+      <span></span>
+      <h2 id="notif-title" class="sheet__title">Notifications</h2>
+      <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
+    </header>
+    <div class="sheet__body notif" data-notif></div>`;
+  const body = $('[data-notif]', content);
+  const nameOf = (id) => state.friends.find((f) => f.id === id)?.display_name || 'Your friend';
+  const view = (game) => (game ? views([game], meId())[0] : null);
+  const rowOf = (v) => (v ? `<ul class="list" role="list">${staticGameRow(v, null, { withMonth: true })}</ul>` : '<p class="notif-card__time">This game is no longer available.</p>');
+  const what = (r) => (r.kind === 'delete' ? 'delete' : 'change');
+
+  const paint = () => {
+    const n = store.notifications();
+    const current = (r) => view(state.games.find((g) => g.id === r.game_id));
+    const incoming = n.incoming.map((r) => `
+      <article class="card notif-card">
+        <p class="notif-card__text"><strong>${esc(nameOf(r.from_id))}</strong> wants to ${what(r)} this game.</p>
+        ${r.kind === 'edit' ? `<p class="notif-label">Now</p>${rowOf(current(r))}<p class="notif-label">Change to</p>${rowOf(view(r.game))}` : rowOf(current(r))}
+        <span class="notif-card__time">${esc(relativeTime(r.created_at))}</span>
+        <div class="notif-card__actions">
+          <button type="button" class="btn btn--tinted" data-respond="${esc(r.id)}" data-approve="0">Decline</button>
+          <button type="button" class="btn btn--primary" data-respond="${esc(r.id)}" data-approve="1">Approve</button>
+        </div>
+      </article>`).join('');
+    const outgoing = n.outgoing.map((r) => `
+      <article class="card notif-card">
+        <p class="notif-card__text">Waiting for <strong>${esc(nameOf(r.to_id))}</strong> to approve your request to ${what(r)} this game.</p>
+        ${rowOf(r.kind === 'edit' ? view(r.game) : current(r))}
+        <span class="notif-card__time">Sent ${esc(relativeTime(r.created_at))}</span>
+        <button type="button" class="btn btn--plain-destructive btn--block" data-cancel-req="${esc(r.id)}">Cancel Request</button>
+      </article>`).join('');
+    const answered = n.answered.map((r) => `
+      <article class="card notif-card">
+        <p class="notif-card__text"><strong>${esc(nameOf(r.to_id))}</strong> <span class="notif-status--${r.status}">${r.status}</span> your request to ${what(r)} a game.</p>
+        ${r.kind === 'edit' || r.status === 'declined' ? rowOf(current(r)) : ''}
+        <span class="notif-card__time">${esc(relativeTime(r.resolved_at))}</span>
+      </article>`).join('');
+    const section = (title, html) => (html ? `<section class="group"><div class="group__head"><h2>${title}</h2></div><div class="notif">${html}</div></section>` : '');
+    body.innerHTML =
+      section('Needs Your Approval', incoming) + section('Waiting on Friends', outgoing) + section('Recent', answered) ||
+      `<p class="notif-empty">No notifications.<br>When a friend asks to edit or delete a game, it shows up here for you to approve.</p>`;
+  };
+  paint();
+  store.markNotificationsSeen();
+  // Keep it current while open (a poll may bring new requests), and stop listening when it closes
+  const unsubscribe = store.subscribe((d) => (d.synced || d.prefs) && paint());
+  const sheet = openSheet({ content, labelledBy: 'notif-title', large: true, onClose: unsubscribe });
+
+  content.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-sheet="done"]')) return sheet.close();
+    const respond = e.target.closest('[data-respond]');
+    const cancel = e.target.closest('[data-cancel-req]');
+    const btn = respond || cancel;
+    if (!btn) return;
+    $$('button', body).forEach((b) => (b.disabled = true));
+    const busy = btn.textContent;
+    btn.textContent = 'Sending…';
+    try {
+      if (respond) {
+        const approve = respond.dataset.approve === '1';
+        await store.respondRequest(respond.dataset.respond, approve);
+        haptic('success');
+        toast(approve ? 'Approved. The game was updated.' : 'Declined');
+      } else {
+        await store.cancelRequest(cancel.dataset.cancelReq);
+        toast('Request cancelled');
+      }
+    } catch (err) {
+      haptic('warning');
+      btn.textContent = busy;
+      toast(requestError(err));
+    }
+    store.markNotificationsSeen();
+    paint();
+  });
+}
+
 // ---------- sidebar profile ----------
 
 function renderSidebarProfile() {
@@ -1998,7 +2194,8 @@ function render(detail = {}) {
   ui.views = views(pair, meId());
   ui.stats = computeStats(pair, meId());
   renderSync();
-  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode]);
+  renderBell();
+  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode, state.requests]);
   if (sig !== ui.signature) {
     ui.signature = sig;
     renderDashboard();
@@ -2027,7 +2224,7 @@ function onStoreChange(detail) {
       closeModals();
       showProfilePage(null);
       ui.resetSearch?.();
-      lockAndStart(detail.expired ? 'Your session ended. Sign in again.' : '');
+      lockAndStart(detail.deleted ? 'Your account was deleted.' : detail.expired ? 'Your session ended. Sign in again.' : '');
     }
     return;
   }
