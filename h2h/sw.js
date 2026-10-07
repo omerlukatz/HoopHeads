@@ -1,7 +1,7 @@
 // Service worker: the app shell opens from the cache instantly and refreshes in the background;
 // logos, crests, avatars and icons are cache-first (they never change between releases).
 // Requests to Google (Firebase, and the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v30';
+const VERSION = 'h2h-v31';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'firebase-config.js', 'css/tokens.css', 'css/app.css',
@@ -19,11 +19,23 @@ self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll([...SHELL.map(fresh), ...LOGOS, ...AVATARS])).then(() => self.skipWaiting()));
 });
 
+// Up to v28 the app ran on the Google Sheet, which now refuses everything. A phone updating from
+// one of those is still showing the old app, so reload it straight into this one (the sign-in screen)
+// instead of waiting for the next time it's opened.
+const SHEET_ERA = (key) => /^h2h-v(\d+)$/.test(key) && Number(key.slice(5)) <= 28;
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
+      .then(async (keys) => {
+        const old = keys.filter((k) => k !== VERSION);
+        await Promise.all(old.map((k) => caches.delete(k)));
+        await self.clients.claim();
+        if (old.some(SHEET_ERA)) {
+          const windows = await self.clients.matchAll({ type: 'window' });
+          await Promise.all(windows.map((w) => w.navigate(w.url).catch(() => {})));
+        }
+      }),
   );
 });
 
