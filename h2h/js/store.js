@@ -127,19 +127,35 @@ export function setMode(mode) {
 // ---------- selectors ----------
 
 export const pendingCount = () => outbox.length;
-export const rival = () => state.friends.find((f) => f.id === state.rivalId) || null;
+/** The Dashboard's "rival" can be "Everyone": your stats against all your friends together. */
+export const EVERYONE = '*';
+const EVERYONE_RIVAL = { id: EVERYONE, display_name: 'Everyone', everyone: true };
+export const isEveryone = () => state.rivalId === EVERYONE && state.friends.length > 0;
+export const rival = () => (isEveryone() ? EVERYONE_RIVAL : state.friends.find((f) => f.id === state.rivalId) || null);
 const opponentOf = (g, me) => (g.player1_id === me ? g.player2_id : g.player1_id);
 
-/** Games between you and one friend (defaults to the current rival) in the current game mode. */
+/** Games between you and one friend (defaults to the current rival; EVERYONE = all of them) in the current game mode. */
 export function pairGames(friendId = state.rivalId) {
   const me = state.session?.userId;
-  return state.games.filter((g) => sportOf(g) === state.mode && (g.player1_id === me || g.player2_id === me) && opponentOf(g, me) === friendId);
+  return state.games.filter(
+    (g) => sportOf(g) === state.mode && (g.player1_id === me || g.player2_id === me) && (friendId === EVERYONE || opponentOf(g, me) === friendId),
+  );
+}
+
+/** The friend you played most recently in the current game mode (the default opponent from "Everyone"). */
+export function lastOpponent() {
+  const me = state.session?.userId;
+  const ids = state.friends.map((f) => f.id);
+  const latest = state.games
+    .filter((g) => sportOf(g) === state.mode && ids.includes(opponentOf(g, me)))
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)))[0];
+  return latest ? opponentOf(latest, me) : ids[0] || null;
 }
 
 /** Keeps the rival valid: last choice → most recently played friend → first friend. */
 function pickRival() {
   const ids = state.friends.map((f) => f.id);
-  if (ids.includes(state.rivalId)) return;
+  if (ids.includes(state.rivalId) || (state.rivalId === EVERYONE && ids.length)) return;
   const me = state.session?.userId;
   const latest = state.games
     .slice()

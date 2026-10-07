@@ -34,6 +34,13 @@ function loadTrendPrefs() {
 const meId = () => state.session?.userId;
 const meName = () => state.me?.display_name || '';
 const oppName = () => store.rival()?.display_name || 'Opponent';
+const everyone = () => store.isEveryone();
+/** A friend's name by id (for "Everyone", where each game has its own opponent). */
+const friendName = (id) => state.friends.find((f) => f.id === id)?.display_name || 'Opponent';
+const gameOpponentName = (gameId) => {
+  const g = state.games.find((x) => x.id === gameId);
+  return g ? friendName(g.player1_id === meId() ? g.player2_id : g.player1_id) : oppName();
+};
 
 // ---------- game modes ----------
 // The UI is the same for both games; only the stats and a few labels change.
@@ -295,14 +302,16 @@ function gameRow(g) {
   const me = getTeam(g.myTeam), opp = getTeam(g.oppTeam);
   const byOpp = g.createdBy && g.createdBy !== meId();
   const meta = [g.shootout && decidedText(g), g.note].filter(Boolean).join(' · ');
+  const opponent = friendName(g.oppId);
   const req = store.pendingRequestFor(g.id);
-  const reqText = req && (req.from_id === meId() ? (req.kind === 'delete' ? 'Delete requested' : 'Edit requested') : `${oppName()} wants to ${req.kind}`);
+  const reqText = req && (req.from_id === meId() ? (req.kind === 'delete' ? 'Delete requested' : 'Edit requested') : `${opponent} wants to ${req.kind}`);
   const tags = [
     g.pending ? `<span class="tag tag--pending">${icon('clock')}Not synced</span>` : '',
     req ? `<span class="tag tag--request">${esc(reqText)}</span>` : '',
-    byOpp ? `<span class="tag">Logged by ${esc(oppName())}</span>` : '',
+    everyone() ? `<span class="tag">vs ${esc(opponent)}</span>` : '',
+    byOpp ? `<span class="tag">Logged by ${esc(opponent)}</span>` : '',
   ].join('');
-  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${oppName()}, ${opp?.name}, ${g.oppScore}. ${resultWord(g)}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${oppName()}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}${req ? `${reqText}. ` : ''}Edit game.`;
+  const label = `${longDate(g.date)}. You, ${me?.name}, ${g.myScore}. ${opponent}, ${opp?.name}, ${g.oppScore}. ${resultWord(g)}${decidedText(g) ? `, ${decidedText(g).toLowerCase()}` : ''}. ${g.note ? g.note + '. ' : ''}${byOpp ? `Logged by ${opponent}. ` : ''}${g.pending ? 'Not synced yet. ' : ''}${req ? `${reqText}. ` : ''}Edit game.`;
   return `<li class="row-wrap" data-id="${g.id}">
     <div class="row-clip">
       <div class="row-actions" aria-hidden="true">
@@ -373,7 +382,7 @@ function renderDashboard() {
     return;
   }
   if (!s.total) {
-    el.innerHTML = emptyState({ iconName: isFifa() ? 'soccer' : 'basketball', text: `No ${MODE_NAMES[state.mode]} games against ${oppName()} yet.`, button: 'Log First Game' });
+    el.innerHTML = emptyState({ iconName: isFifa() ? 'soccer' : 'basketball', text: everyone() ? `No ${MODE_NAMES[state.mode]} games yet.` : `No ${MODE_NAMES[state.mode]} games against ${oppName()} yet.`, button: 'Log First Game' });
     ui.shown = {};
     return;
   }
@@ -386,8 +395,10 @@ function renderDashboard() {
   };
   const opp = esc(oppName());
   const drawsText = isFifa() && s.draws ? ` · ${s.draws} ${s.draws === 1 ? 'draw' : 'draws'}` : '';
-  const h2h =
-    (s.wins === s.losses
+  const played = new Set(ui.views.map((g) => g.oppId)).size;
+  const h2h = everyone()
+    ? `Against ${played} ${played === 1 ? 'friend' : 'friends'}${drawsText}`
+    : (s.wins === s.losses
       ? `You and ${opp} are tied ${s.wins}–${s.losses}`
       : s.wins > s.losses
         ? `You lead ${opp} ${s.wins}–${s.losses}`
@@ -508,8 +519,9 @@ function clutchTile() {
   const sheets = () => {
     const { mine, theirs } = c.cleanSheets;
     const cls = mine === theirs ? '' : mine > theirs ? 'is-win' : 'is-loss';
-    return `<div><button type="button" class="stat-link" data-clutch="cleanSheets" aria-label="Clean sheets: you ${mine}, ${esc(oppName())} ${theirs}. Show games">
-      <span class="trio__dt">Clean Sheets</span><span class="trio__dd ${cls}">${mine}</span><span class="trio__hint">${esc(oppName())}: ${theirs}</span>
+    const them = everyone() ? 'Opponents' : oppName();
+    return `<div><button type="button" class="stat-link" data-clutch="cleanSheets" aria-label="Clean sheets: you ${mine}, ${esc(them)} ${theirs}. Show games">
+      <span class="trio__dt">Clean Sheets</span><span class="trio__dd ${cls}">${mine}</span><span class="trio__hint">${esc(them)}: ${theirs}</span>
     </button></div>`;
   };
   return `<section class="card tile area-clutch" aria-labelledby="clutch-title">
@@ -537,6 +549,7 @@ function bestAndWorst(side) {
 function renderTeams() {
   const card = $('#teams-card');
   if (!card) return;
+  if (everyone()) ui.teamsSide = 'myTeam'; // no single opponent to compare with
   const side = ui.teamsSide;
   const mine = side === 'myTeam';
   const who = mine ? 'You' : oppName();
@@ -559,10 +572,14 @@ function renderTeams() {
   card.innerHTML = `
     <div class="teams__top">
       <h3 class="tile__title" id="teams-title">Best &amp; Worst Teams</h3>
-      <div class="seg" role="radiogroup" aria-label="Whose teams" style="--count:2;--index:${index}">
+      ${
+        everyone()
+          ? ''
+          : `<div class="seg" role="radiogroup" aria-label="Whose teams" style="--count:2;--index:${index}">
         <span class="seg__thumb" aria-hidden="true"></span>
         ${opts.map((o, i) => `<button type="button" class="seg__item" role="radio" aria-checked="${i === index}" tabindex="${i === index ? 0 : -1}" data-teams="${o.value}">${esc(o.label)}</button>`).join('')}
-      </div>
+      </div>`
+      }
     </div>
     <p class="activity__sub">${mine ? 'Teams you played as, by your win rate with them.' : `Teams ${esc(oppName())} played as, by their win rate against you.`}${teams ? ` ${teams} ${teams === 1 ? 'team' : 'teams'} used.` : ''}</p>
     ${best ? `<ul class="teams__list" role="list">${row('best', best)}${row('worst', worst)}</ul>` : `<p class="tile__empty">No games yet.</p>`}
@@ -609,8 +626,8 @@ document.addEventListener('click', (e) => {
     const r = record(list);
     const sub =
       kind === 'cleanSheets'
-        ? `vs ${oppName()} · You kept ${list.filter((g) => g.oppScore === 0).length} · ${oppName()} kept ${list.filter((g) => g.myScore === 0).length}`
-        : `vs ${oppName()} · You’re ${wl(r)}`;
+        ? `${everyone() ? 'vs everyone' : `vs ${oppName()}`} · You kept ${list.filter((g) => g.oppScore === 0).length} · ${everyone() ? 'Opponents' : oppName()} kept ${list.filter((g) => g.myScore === 0).length}`
+        : `${everyone() ? 'vs everyone' : `vs ${oppName()}`} · You’re ${wl(r)}`;
     gamesPopup(CLUTCH_CELLS[kind].title, sub, list);
     return;
   }
@@ -638,7 +655,7 @@ function renderTrend() {
     points: timeline(store.pairGames(), meId()),
     metric: ui.trend.metric,
     range: ui.trend.range,
-    opponent: `vs ${oppName()}`,
+    opponent: everyone() ? 'vs everyone' : `vs ${oppName()}`,
     onChange: (patch) => {
       Object.assign(ui.trend, patch);
       try {
@@ -676,7 +693,7 @@ function renderHistory() {
     return;
   }
   if (!ui.views.length) {
-    el.innerHTML = emptyState({ iconName: 'history', text: `${MODE_NAMES[state.mode]} games against ${oppName()} will appear here.`, button: 'Log a Game' });
+    el.innerHTML = emptyState({ iconName: 'history', text: everyone() ? `Your ${MODE_NAMES[state.mode]} games will appear here.` : `${MODE_NAMES[state.mode]} games against ${oppName()} will appear here.`, button: 'Log a Game' });
     return;
   }
   const months = new Map();
@@ -1013,7 +1030,7 @@ const requestError = (err) => (err.code === 'network' ? 'You’re offline. Reque
  * Delete a game, after asking. A saved game is only deleted once the other player approves, so this
  * sends them a request. A game that hasn't synced yet is just yours, so it goes straight away.
  */
-async function removeGame(id, opponentName = oppName()) {
+async function removeGame(id, opponentName = gameOpponentName(id)) {
   haptic('medium');
   const rows = $$(`.row-wrap[data-id="${id}"]`);
   const snapBack = () =>
@@ -1155,8 +1172,8 @@ function openGameSheet({ id = null } = {}) {
   const view = ui.views.find((g) => g.id === id);
   // Who the game is against: fixed when editing; for a new game it starts as the current rivalry
   // and can be switched by tapping the opponent's name.
-  const otherId = editing ? (source.player1_id === meId() ? source.player2_id : source.player1_id) : state.rivalId;
-  let opponent = state.friends.find((f) => f.id === otherId) || store.rival();
+  const otherId = editing ? (source.player1_id === meId() ? source.player2_id : source.player1_id) : everyone() ? store.lastOpponent() : state.rivalId;
+  let opponent = state.friends.find((f) => f.id === otherId) || state.friends[0];
   // The sport is fixed when editing; a new game is logged in the current game mode
   const sport = editing ? sportOf(source) : state.mode;
   const fifa = sport === 'fifa';
@@ -1366,7 +1383,7 @@ function openGameSheet({ id = null } = {}) {
     if (editing) store.updateGame({ ...neutral, id: source.id });
     else {
       store.addGame(neutral);
-      if (opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged
+      if (!everyone() && opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged
     }
     haptic('success');
     sheet.close();
@@ -2000,6 +2017,12 @@ function renderSidebarProfile() {
 
 // ---------- friends ----------
 
+/** Friends you've played the most (in the current game mode) first; ties alphabetically. */
+function byGamesPlayed(friends) {
+  const played = new Map(friends.map((f) => [f.id, store.pairGames(f.id).length]));
+  return friends.slice().sort((a, b) => played.get(b.id) - played.get(a.id) || a.display_name.localeCompare(b.display_name));
+}
+
 function friendRecord(friendId) {
   return record(views(store.pairGames(friendId), meId()));
 }
@@ -2021,7 +2044,7 @@ function renderFriends() {
   if (!el || ui.searching) return;
   const invite = `<section class="group" aria-labelledby="invite-title">
     <div class="group__head"><h2 id="invite-title">Invite</h2></div>
-    <ul class="list" role="list"><li><button type="button" class="cell cell--button" data-action="invite">${icon('export')}<span>Share Dubs</span></button></li></ul>
+    <button type="button" class="btn btn--primary btn--block btn--share" data-action="invite">${icon('export')}<span>Share Dubs</span></button>
     <p class="group__foot">Send friends the link. Once they sign up, search for them here and tap Add.</p>
   </section>`;
   if (!state.friends.length) {
@@ -2031,13 +2054,8 @@ function renderFriends() {
     </div>${invite}`;
     return;
   }
-  const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
-  const meRow = state.me
-    ? `<section class="group"><ul class="list list--friends" role="list"><li><button type="button" class="cell cell--button friend-row" data-action="open-profile" data-id="${esc(state.me.id)}" aria-label="My profile: your stats against everyone">
-        ${avatar(state.me, 'md')}<span class="cell__stack"><span class="cell__title">My Profile</span><span class="cell__sub">Your stats against everyone</span></span>
-        <svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg></button></li></ul></section>`
-    : '';
-  el.innerHTML = `${meRow}<section class="group" aria-labelledby="friends-title">
+  const sorted = byGamesPlayed(state.friends);
+  el.innerHTML = `<section class="group" aria-labelledby="friends-title">
     <div class="group__head"><h2 id="friends-title">Your Friends</h2><span class="group__record">${sorted.length}</span></div>
     <ul class="list list--friends" role="list">${sorted.map((f) => friendRow(f, { more: true, action: 'open-profile' })).join('')}</ul>
     <p class="group__foot">Tap a friend to see their profile and stats. Tap ⋯ to remove or block.</p>
@@ -2232,7 +2250,15 @@ function openRivalSwitcher() {
   if (document.documentElement.classList.contains('has-modal')) return;
   const content = document.createElement('div');
   content.className = 'sheet__content';
-  const sorted = state.friends.slice().sort((a, b) => a.display_name.localeCompare(b.display_name));
+  const sorted = byGamesPlayed(state.friends);
+  const all = record(views(store.pairGames(store.EVERYONE), meId()));
+  const onAll = everyone();
+  const everyoneRow = `<li><button type="button" class="cell cell--button friend-row" data-action="open-rival" data-id="${store.EVERYONE}" aria-label="Everyone: your stats against all your friends. Your record ${recLabel(all)}"${onAll ? ' aria-current="true"' : ''}>
+      <span class="avatar avatar--md avatar--everyone" aria-hidden="true">${icon('people')}</span>
+      <span class="cell__stack"><span class="cell__title">Everyone</span><span class="cell__sub">Your stats against all your friends</span></span>
+      <span class="friend-row__record ${gamesIn(all) ? (all.wins >= all.losses ? 'is-win' : 'is-loss') : ''}">${gamesIn(all) ? wl(all) : '—'}</span>
+      ${onAll ? icon('check', 'friend-row__check') : ''}
+    </button></li>`;
   content.innerHTML = `
     <header class="sheet__header">
       <span></span>
@@ -2240,7 +2266,8 @@ function openRivalSwitcher() {
       <button type="button" class="btn-text btn-text--strong" data-sheet="done">Done</button>
     </header>
     <div class="sheet__body">
-      <ul class="list list--friends list--sheet" role="list">${sorted.map((f) => friendRow(f, { chevron: false })).join('')}</ul>
+      <ul class="list list--friends list--sheet" role="list">${everyoneRow}</ul>
+      <ul class="list list--friends list--sheet" role="list" style="margin-top:16px">${sorted.map((f) => friendRow(f, { chevron: false })).join('')}</ul>
       <ul class="list list--sheet" role="list" style="margin-top:16px">
         <li><button type="button" class="cell cell--button" data-sheet="find">${icon('people')}<span>Find Friends</span></button></li>
       </ul>

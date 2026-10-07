@@ -2107,3 +2107,11 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .ptr__icon { width: 22px; height: 22px; stroke-width: 2; }
 .ptr.is-refreshing .ptr__icon { animation: spin 800ms linear infinite; }
 @media (prefers-reduced-motion: reduce) { .ptr.is-refreshing .ptr__icon { animation-duration: 2s; } }
+
+/* "Everyone" in the rivalry switcher */
+.avatar--everyone { background: var(--accent-tint); color: var(--accent); }
+.avatar--everyone .icon { width: 22px; height: 22px; }
+
+/* Share Dubs: a full-width filled button */
+.btn--share { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn--share .icon { width: 20px; height: 20px; stroke-width: 2; }
