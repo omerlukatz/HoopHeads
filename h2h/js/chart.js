@@ -30,11 +30,16 @@ function niceStep(span, count) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
 }
 
-/** The slice of the timeline a range shows, with an anchor carrying the value from before it. */
-export function slice(points, metricId, rangeId, now = Date.now()) {
+/**
+ * The slice of the timeline a range shows. The x axis is games played (game 1, 2, 3…), not time:
+ * the range picks which games (e.g. those from the last month), and `n` is each game's number.
+ * The anchor carries the value from the game before the range (or the starting value).
+ */
+export function slice(allPoints, metricId, rangeId, now = Date.now()) {
   const metric = METRICS[metricId];
   const range = RANGES.find((r) => r.id === rangeId) || RANGES.at(-1);
   const start = range.days ? now - range.days * DAY : null;
+  const points = allPoints.map((p, i) => ({ ...p, n: i + 1 }));
   let inRange = points.filter((p) => start === null || p.t >= start);
   const prior = start === null ? null : [...points].reverse().find((p) => p.t < start);
   // Win rate swings wildly over the first few games (1 game = 0% or 100%), so the all-time view
@@ -43,27 +48,20 @@ export function slice(points, metricId, rangeId, now = Date.now()) {
   if (settle) inRange = inRange.slice(4);
 
   let anchor = null;
-  if (prior) anchor = { t: start, v: prior[metricId] };
-  else if (metric.base !== null && (inRange.length || points.length)) {
-    const firstT = (inRange[0] || points[0]).t;
-    anchor = { t: start ?? firstT - DAY / 2, v: metric.base };
+  if (inRange.length) {
+    if (prior) anchor = { n: prior.n, v: prior[metricId] }; // the game just before the range
+    else if (metric.base !== null && !settle) anchor = { n: 0, v: metric.base }; // before game 1: even
   }
 
-  const series = inRange.map((p) => ({ t: p.t, v: p[metricId], game: p.game }));
-  const xMin = anchor ? anchor.t : series[0]?.t ?? (start ?? now - DAY);
-  let xMax = start === null ? series.at(-1)?.t ?? now : now;
-  if (xMax - xMin < DAY) xMax = xMin + DAY;
+  const series = inRange.map((p) => ({ n: p.n, t: p.t, v: p[metricId], game: p.game }));
+  const xMin = anchor ? anchor.n : series[0]?.n ?? 0;
+  let xMax = series.at(-1)?.n ?? xMin;
+  if (xMax - xMin < 1) xMax = xMin + 1;
   const current = points.length ? points.at(-1)[metricId] : metric.base;
   const from = anchor ? anchor.v : series[0]?.v;
   const values = [...(anchor ? [anchor.v] : []), ...series.map((s) => s.v)];
   const change = metricId === 'winPct' && start === null ? null : from == null || current == null ? null : current - from;
   return { metric, range, anchor, series, xMin, xMax, current, change, settled: settle, peak: values.length ? Math.max(...values) : null, low: values.length ? Math.min(...values) : null };
-}
-
-function dateTick(t, span) {
-  const d = new Date(t);
-  if (span > 200 * DAY) return d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function segmented(name, label, options, value) {
@@ -81,7 +79,7 @@ function segmented(name, label, options, value) {
 export function renderTrendCard(card, { points, metric: metricId, range: rangeId, opponent, onChange, titleId = 'trend-title' }) {
   const s = slice(points, metricId, rangeId);
   const { metric } = s;
-  const hasPlot = s.series.length > 0 || s.anchor;
+  const hasPlot = s.series.length > 0;
   const changeClass = s.change > 0.5 ? 'is-win' : s.change < -0.5 ? 'is-loss' : '';
   const arrow = s.change > 0.5 ? '▲' : s.change < -0.5 ? '▼' : '';
   const games = s.series.length;
@@ -97,7 +95,7 @@ export function renderTrendCard(card, { points, metric: metricId, range: rangeId
     </div>
     <p class="trend__sub">${s.settled ? `${points.length} games · from game 5` : games ? `${games} ${games === 1 ? 'game' : 'games'}` : 'No games in this period'}${s.peak != null && games ? ` · High ${esc(metric.fmt(s.peak))} · Low ${esc(metric.fmt(s.low))}` : ''}</p>
     <div class="trend__plot" data-plot>
-      ${hasPlot ? '' : '<p class="trend__empty">Log a game to start the chart.</p>'}
+      ${hasPlot ? '' : `<p class="trend__empty">${points.length ? 'No games in this period.' : 'Log a game to start the chart.'}</p>`}
     </div>
     ${segmented('range', 'Time range', RANGES.map((r) => ({ value: r.id, label: r.id })), s.range.id)}
     <table class="visually-hidden"><caption>${esc(metric.label)} after each game, ${esc(s.range.phrase)}</caption>
@@ -146,19 +144,28 @@ function drawPlot(host, s, titleId) {
   hi = Math.ceil(hi / step) * step;
   if (metricIsPct(metric)) (lo = Math.max(0, lo)), (hi = Math.min(100, hi));
 
-  const x = (t) => M.left + ((t - s.xMin) / (s.xMax - s.xMin)) * iw;
+  const x = (n) => M.left + ((n - s.xMin) / (s.xMax - s.xMin)) * iw;
   const y = (v) => M.top + ih - ((v - lo) / (hi - lo)) * ih;
 
   const yTicks = [];
   for (let v = lo; v <= hi + step / 2; v += step) yTicks.push(v);
-  const xCount = W >= 520 ? 5 : 3;
-  const xTicks = Array.from({ length: xCount }, (_, i) => s.xMin + ((s.xMax - s.xMin) * i) / (xCount - 1));
+  // Game-number ticks on whole, round steps (1, 2, 5, 10…), labelled "Game 12", "15", "20"…
+  const xStep = Math.max(1, niceStep(s.xMax - s.xMin, W >= 520 ? 5 : 3));
+  const xTicks = [];
+  for (let n = Math.ceil(Math.max(1, s.xMin) / xStep) * xStep; n <= s.xMax; n += xStep) xTicks.push(n);
+  const firstN = s.series[0]?.n ?? 1; // label where the line starts too
+  if (!xTicks.length || xTicks[0] - firstN >= xStep / 2) xTicks.unshift(firstN);
+  // Always label the latest game at the right edge (dropping a round tick that would crowd it)
+  const lastN = s.series.at(-1)?.n;
+  if (lastN && xTicks.at(-1) !== lastN) {
+    if (xTicks.length > 1 && lastN - xTicks.at(-1) < xStep / 2) xTicks.pop();
+    xTicks.push(lastN);
+  }
+  const tickLabel = (n, i) => (i === 0 ? `Game ${n}` : String(n));
 
-  // Carry the line to "now" when the range ends after the last game, so flat stretches read as flat
-  const pts = [...all];
-  if (s.range.days && pts.length && pts.at(-1).t < s.xMax) pts.push({ t: s.xMax, v: pts.at(-1).v, carry: true });
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
-  const area = `${line}L${x(pts.at(-1).t).toFixed(1)},${(M.top + ih).toFixed(1)}L${x(pts[0].t).toFixed(1)},${(M.top + ih).toFixed(1)}Z`;
+  const pts = all;
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.n).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const area = `${line}L${x(pts.at(-1).n).toFixed(1)},${(M.top + ih).toFixed(1)}L${x(pts[0].n).toFixed(1)},${(M.top + ih).toFixed(1)}Z`;
   const evenV = metric.evenAt ?? metric.base;
   const showEven = evenV != null && evenV > lo && evenV < hi;
   const last = series.at(-1);
@@ -167,12 +174,12 @@ function drawPlot(host, s, titleId) {
     <svg class="trend__svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${titleId}" tabindex="0">
       <g class="trend__grid">
         ${yTicks.map((v) => `<line x1="${M.left}" x2="${W - M.right}" y1="${y(v)}" y2="${y(v)}"/><text class="trend__ylabel" x="${M.left - 8}" y="${y(v)}" dy="0.32em">${esc(metric.fmt(v))}</text>`).join('')}
-        ${xTicks.map((t, i) => `<text class="trend__xlabel" x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}">${esc(dateTick(t, s.xMax - s.xMin))}</text>`).join('')}
+        ${xTicks.map((n, i) => `<text class="trend__xlabel" x="${x(n)}" y="${H - 6}" text-anchor="${i === 0 && x(n) - M.left < 30 ? 'start' : x(n) > W - M.right - 20 ? 'end' : 'middle'}">${esc(tickLabel(n, i))}</text>`).join('')}
       </g>
       ${showEven ? `<line class="trend__even" x1="${M.left}" x2="${W - M.right}" y1="${y(evenV)}" y2="${y(evenV)}"/>` : ''}
       <path class="trend__area" d="${area}"/>
       <path class="trend__line" d="${line}"/>
-      ${last ? `<circle class="trend__end" cx="${x(last.t)}" cy="${y(last.v)}" r="4"/>` : ''}
+      ${last ? `<circle class="trend__end" cx="${x(last.n)}" cy="${y(last.v)}" r="4"/>` : ''}
       <g class="trend__cursor" hidden><line y1="${M.top}" y2="${M.top + ih}"/><circle r="5"/></g>
     </svg>
     <div class="trend__tip" role="status" aria-live="polite" hidden></div>`;
@@ -198,7 +205,7 @@ function drawPlot(host, s, titleId) {
     if (i === active) return;
     active = i;
     const p = series[i];
-    const cx = x(p.t), cy = y(p.v);
+    const cx = x(p.n), cy = y(p.v);
     cursor.hidden = false;
     cursor.querySelector('line').setAttribute('x1', cx);
     cursor.querySelector('line').setAttribute('x2', cx);
@@ -206,7 +213,7 @@ function drawPlot(host, s, titleId) {
     cursor.querySelector('circle').setAttribute('cy', cy);
     const g = p.game;
     const date = new Date(`${g.date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>${esc(date)} · ${g.result} ${g.myScore}–${g.oppScore}${g.shootout ? ` (${g.myPens}–${g.oppPens} pens)` : g.overtime ? (g.sport === 'fifa' ? ' ET' : ' OT') : ''}</span>`;
+    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>Game ${p.n} · ${esc(date)} · ${g.result} ${g.myScore}–${g.oppScore}${g.shootout ? ` (${g.myPens}–${g.oppPens} pens)` : g.overtime ? (g.sport === 'fifa' ? ' ET' : ' OT') : ''}</span>`;
     tip.hidden = false;
     const tw = tip.offsetWidth;
     tip.style.left = `${Math.min(Math.max(cx - tw / 2, 0), W - tw)}px`;
@@ -221,7 +228,7 @@ function drawPlot(host, s, titleId) {
     const rect = svg.getBoundingClientRect();
     const px = ((clientX - rect.left) / rect.width) * W;
     let best = 0;
-    series.forEach((p, i) => Math.abs(x(p.t) - px) < Math.abs(x(series[best].t) - px) && (best = i));
+    series.forEach((p, i) => Math.abs(x(p.n) - px) < Math.abs(x(series[best].n) - px) && (best = i));
     return best;
   };
 

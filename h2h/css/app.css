@@ -2080,3 +2080,30 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .notif-status--declined { color: var(--loss-text); font-weight: 600; }
 .tag--request { color: var(--ot-text); font-weight: 600; }
 .edit-banner { padding: 10px 14px; border-radius: var(--r-control); background: var(--ot-tint); color: var(--ot-text); font-size: var(--fs-footnote); font-weight: 500; }
+
+/* ============ Pull to refresh (Dashboard) ============ */
+
+.ptr {
+  position: absolute;
+  z-index: 9;
+  top: calc(var(--safe-top) + var(--navbar-h));
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-left: -19px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: var(--shadow-float);
+  color: var(--label-2);
+  opacity: 0;
+  transform: translate3d(0, -48px, 0);
+  transition: transform 260ms var(--spring), opacity 200ms ease;
+  pointer-events: none;
+}
+.ptr.is-pulling { transition: none; }
+.ptr.is-armed, .ptr.is-refreshing { color: var(--accent); }
+.ptr__icon { width: 22px; height: 22px; stroke-width: 2; }
+.ptr.is-refreshing .ptr__icon { animation: spin 800ms linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ptr.is-refreshing .ptr__icon { animation-duration: 2s; } }

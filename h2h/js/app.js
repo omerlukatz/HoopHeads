@@ -162,6 +162,85 @@ function initNavBars() {
   }
 }
 
+// ---------- pull to refresh (Dashboard) ----------
+
+/**
+ * At the top of the Dashboard, pull down and let go to fetch the latest games. A circle drops in
+ * from under the nav bar, turning as you pull; past the threshold you feel a tick and releasing
+ * refreshes. Sideways swipes (swipe-to-delete) and pulls that start mid-page are ignored.
+ */
+function initPullToRefresh() {
+  const screen = $('.screen[data-screen="dashboard"]');
+  const scroller = $('.scroller', screen);
+  const ptr = $('.ptr', screen);
+  const THRESHOLD = 64;
+  let start = null; // { x, y } while a pull might be happening
+  let pull = 0;
+  let armed = false;
+  let busy = false;
+
+  const paint = () => {
+    ptr.style.transform = `translate3d(0, ${pull - 48}px, 0)`;
+    ptr.style.opacity = String(Math.min(1, pull / 40));
+    $('.ptr__icon', ptr).style.transform = busy ? '' : `rotate(${pull * 4}deg)`;
+  };
+  const reset = () => {
+    pull = 0;
+    armed = false;
+    ptr.classList.remove('is-pulling', 'is-armed');
+    paint();
+  };
+
+  scroller.addEventListener('touchstart', (e) => {
+    const blocked = busy || e.touches.length !== 1 || scroller.scrollTop > 0 || isLocked() || document.documentElement.classList.contains('has-modal');
+    start = blocked ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+
+  scroller.addEventListener('touchmove', (e) => {
+    if (!start) return;
+    const dx = e.touches[0].clientX - start.x;
+    const dy = e.touches[0].clientY - start.y;
+    if (!pull) {
+      // Decide what this gesture is before showing anything
+      if (Math.abs(dx) > 10 && Math.abs(dx) > dy) return (start = null); // sideways (swipe-to-delete)
+      if (dy < -6) return (start = null); // scrolling down the page
+      if (dy < 12) return; // too small to tell yet
+    }
+    pull = Math.min(110, Math.max(0, (dy - 12) * 0.5));
+    const wasArmed = armed;
+    armed = pull >= THRESHOLD;
+    if (armed && !wasArmed) haptic('light');
+    ptr.classList.add('is-pulling');
+    ptr.classList.toggle('is-armed', armed);
+    paint();
+  }, { passive: true });
+
+  scroller.addEventListener('touchcancel', () => {
+    start = null;
+    reset();
+  });
+
+  scroller.addEventListener('touchend', async () => {
+    if (!start) return;
+    start = null;
+    if (!armed) return reset();
+    busy = true;
+    ptr.classList.remove('is-pulling', 'is-armed');
+    ptr.classList.add('is-refreshing');
+    pull = 56;
+    paint();
+    const before = state.lastSynced;
+    await store.sync();
+    if (state.status === 'offline') toast('You’re offline. Showing your saved games.');
+    else if (state.status === 'error') toast(state.error || 'Couldn’t refresh. Try again.');
+    else if (state.lastSynced === before) toast('Google Sheets didn’t answer. Try again in a moment.');
+    else haptic('success');
+    busy = false;
+    ptr.classList.remove('is-refreshing');
+    reset();
+  });
+}
+
 // ---------- sync indicator ----------
 
 function renderSync() {
@@ -681,14 +760,6 @@ function renderSettings() {
     <p class="group__foot">You stay signed in on this device. Changing your PIN signs you out everywhere else. Turn on Require PIN to be asked for it each time the app opens.</p>
   </section>
 
-  <section class="group" aria-labelledby="set-danger">
-    <div class="group__head"><h2 id="set-danger">Delete Account</h2></div>
-    <ul class="list" role="list">
-      <li><button type="button" class="cell cell--button cell--destructive" id="delete-account-btn">Delete Account</button></li>
-    </ul>
-    <p class="group__foot">Permanently deletes your profile, friends and requests, and removes your games from your friends’ stats. You’ll need your PIN.</p>
-  </section>
-
   <section class="group" aria-labelledby="set-theme">
     <div class="group__head"><h2 id="set-theme">Theme</h2></div>
     <div class="list swatches" role="radiogroup" aria-labelledby="set-theme">
@@ -728,6 +799,14 @@ function renderSettings() {
   </section>`
       : ''
   }
+
+  <section class="group" aria-labelledby="set-danger">
+    <div class="group__head"><h2 id="set-danger">Delete Account</h2></div>
+    <ul class="list" role="list">
+      <li><button type="button" class="cell cell--button cell--destructive" id="delete-account-btn">Delete Account</button></li>
+    </ul>
+    <p class="group__foot">Permanently deletes your profile, friends and requests, and removes your games from your friends’ stats. You’ll need your PIN.</p>
+  </section>
   <p class="group__foot group__foot--center">Dubs 2.0 · ${isDemo ? 'Demo mode' : 'Synced with Google Sheets'}</p>`;
 }
 
@@ -2280,6 +2359,7 @@ async function init() {
   initSettings();
   initFriends();
   initProfilePage();
+  initPullToRefresh();
   route();
   store.subscribe(onStoreChange);
   window.addEventListener('hashchange', route);
