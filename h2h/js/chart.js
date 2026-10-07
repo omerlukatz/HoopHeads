@@ -149,7 +149,7 @@ function drawPlot(host, s, titleId) {
 
   const yTicks = [];
   for (let v = lo; v <= hi + step / 2; v += step) yTicks.push(v);
-  // Game-number ticks on whole, round steps (1, 2, 5, 10…), labelled "Game 12", "15", "20"…
+  // Game-number ticks on whole, round steps (1, 2, 5, 10…), plain numbers: "5", "20", "38"
   const xStep = Math.max(1, niceStep(s.xMax - s.xMin, W >= 520 ? 5 : 3));
   const xTicks = [];
   for (let n = Math.ceil(Math.max(1, s.xMin) / xStep) * xStep; n <= s.xMax; n += xStep) xTicks.push(n);
@@ -161,7 +161,7 @@ function drawPlot(host, s, titleId) {
     if (xTicks.length > 1 && lastN - xTicks.at(-1) < xStep / 2) xTicks.pop();
     xTicks.push(lastN);
   }
-  const tickLabel = (n, i) => (i === 0 ? `Game ${n}` : String(n));
+  const tickLabel = (n) => String(n);
 
   const pts = all;
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.n).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
@@ -211,9 +211,8 @@ function drawPlot(host, s, titleId) {
     cursor.querySelector('line').setAttribute('x2', cx);
     cursor.querySelector('circle').setAttribute('cx', cx);
     cursor.querySelector('circle').setAttribute('cy', cy);
-    const g = p.game;
-    const date = new Date(`${g.date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>Game ${p.n} · ${esc(date)} · ${g.result} ${g.myScore}–${g.oppScore}${g.shootout ? ` (${g.myPens}–${g.oppPens} pens)` : g.overtime ? (g.sport === 'fifa' ? ' ET' : ' OT') : ''}</span>`;
+    const date = new Date(`${p.game.date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    tip.innerHTML = `<strong>${esc(metric.fmt(p.v))}</strong><span>${esc(date)}</span>`;
     tip.hidden = false;
     const tw = tip.offsetWidth;
     tip.style.left = `${Math.min(Math.max(cx - tw / 2, 0), W - tw)}px`;

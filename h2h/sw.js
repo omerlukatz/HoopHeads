@@ -1,7 +1,7 @@
 // Service worker: the app shell opens from the cache instantly and refreshes in the background;
 // logos, crests, avatars and icons are cache-first (they never change between releases).
 // Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v26';
+const VERSION = 'h2h-v27';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'css/tokens.css', 'css/app.css',

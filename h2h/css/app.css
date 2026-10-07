@@ -1557,7 +1557,7 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
   pointer-events: none;
   white-space: nowrap;
 }
-.trend__tip strong { font-size: var(--fs-headline); font-variant-numeric: tabular-nums; }
+.trend__tip strong { font-size: 22px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .trend__tip span { font-size: var(--fs-caption); color: var(--label-2); }
 
 /* Segmented control (iOS): radio buttons with a sliding thumb */
