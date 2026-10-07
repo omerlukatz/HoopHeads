@@ -30,8 +30,10 @@
 // is online but slow), which call() retries automatically first.
 import { CONFIG } from '../config.js';
 import * as demo from './demo.js';
+import { createFirebaseBackend } from './firebase-backend.js';
 
-export const isDemo = !CONFIG.APPS_SCRIPT_URL;
+export const isFirebase = CONFIG.BACKEND === 'firebase';
+export const isDemo = !isFirebase && !CONFIG.APPS_SCRIPT_URL;
 
 export class ApiError extends Error {
   constructor(message, code, extra = {}) {
@@ -133,7 +135,7 @@ const remote = {
   deleteAccount: (token, pin) => call('POST', { action: 'deleteAccount', token, pin }),
 };
 
-const backend = isDemo ? demo.createDemoBackend(ApiError) : remote;
+const backend = isFirebase ? createFirebaseBackend(ApiError) : isDemo ? demo.createDemoBackend(ApiError) : remote;
 
 export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount } = backend;
 export const demoControls = isDemo ? demo.controls : null;

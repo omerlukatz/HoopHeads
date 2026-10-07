@@ -1,0 +1,211 @@
+rules_version = '2';
+
+// Security rules for Dubs (Cloud Firestore). These are what keep the data safe: the app's
+// Firebase config is public, so every read and write is checked here.
+//
+// Identity: each player signs in with a Firebase Auth account whose email is
+// "<userId>@users.hoophead.xyz" (the userId is the same id the Google Sheet used, e.g.
+// u_1a2b3c…), so games, friendships and requests keep pointing at the same ids after the move.
+//
+// Collections
+//   usernames/{username}   { userId, claimed }            public lookup for sign-in
+//   users/{userId}         { username, display_name, color, initial, avatar, created_at }
+//   friendships/{a__b}     { user_a, user_b, created_at }  ids sorted, joined by "__"
+//   blocks/{blocker__blocked} { blocker, blocked, created_at }
+//   games/{gameId}         same fields as the Sheet + players [player1_id, player2_id] + last_request
+//   requests/{requestId}   { game_id, from_id, to_id, kind, game, status, created_at, resolved_at }
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- who's asking ----------
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('u_[A-Za-z0-9_]+@users[.]hoophead[.]xyz');
+    }
+    function me() { return request.auth.token.email.split('@')[0]; }
+    function path(coll, id) { return /databases/$(database)/documents/$(coll)/$(id); }
+    /** Signed in and has a profile (i.e. not a half-created or deleted account). */
+    function member() { return signedIn() && exists(path('users', me())); }
+
+    function pairId(a, b) { return a < b ? a + '__' + b : b + '__' + a; }
+    function friends(a, b) { return exists(path('friendships', pairId(a, b))); }
+    function blocked(a, b) { return exists(path('blocks', a + '__' + b)) || exists(path('blocks', b + '__' + a)); }
+    /** Used when deleting your account: your profile is gone at the end of the same batch. */
+    function deletingMyAccount() { return signedIn() && !existsAfter(path('users', me())); }
+    function onlyChanged(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    // ---------- usernames (sign-in lookup) ----------
+
+    match /usernames/{name} {
+      // Anyone may look up one username (needed before signing in); nobody may list them all.
+      allow get: if true;
+      allow list: if false;
+      // A new or renamed account claims its username in the same batch as its profile.
+      allow create: if signedIn()
+        && name.matches('[a-z0-9_.]{3,20}')
+        && request.resource.data.keys().hasOnly(['userId', 'claimed'])
+        && request.resource.data.userId == me()
+        && request.resource.data.claimed == true
+        && getAfter(path('users', me())).data.username == name;
+      allow delete: if signedIn() && resource.data.userId == me();
+      allow update: if false; // the "claimed" flag is set by the migration script only
+    }
+
+    // ---------- profiles ----------
+
+    match /users/{userId} {
+      allow read: if member() || (signedIn() && userId == me());
+      allow create: if signedIn() && userId == me() && validProfile(request.resource.data);
+      allow update: if signedIn() && userId == me() && validProfile(request.resource.data)
+        && request.resource.data.created_at == resource.data.created_at
+        // a new username must be claimed in the same batch
+        && (request.resource.data.username == resource.data.username
+            || getAfter(path('usernames', request.resource.data.username)).data.userId == me());
+      allow delete: if signedIn() && userId == me();
+    }
+
+    function validProfile(u) {
+      return u.keys().hasOnly(['username', 'display_name', 'color', 'initial', 'avatar', 'created_at', 'migrated'])
+        && u.username is string && u.username.matches('[a-z0-9_.]{3,20}')
+        && u.display_name is string && u.display_name.size() > 0 && u.display_name.size() <= 24
+        && u.color is string && u.color.matches('#[0-9A-Fa-f]{6}')
+        && u.initial is string && u.initial.size() <= 2
+        && u.avatar is string && (u.avatar == '' || u.avatar.matches('a[0-9]{2}'))
+        && u.created_at is string;
+    }
+
+    // ---------- friendships & blocks ----------
+
+    match /friendships/{fid} {
+      // get by id works even when the doc doesn't exist yet ("are we friends?"), as long as it's yours
+      allow get: if member() && me() in fid.split('__');
+      allow list: if member() && (resource.data.user_a == me() || resource.data.user_b == me());
+      allow create: if member()
+        && request.resource.data.keys().hasOnly(['user_a', 'user_b', 'created_at'])
+        && (request.resource.data.user_a == me() || request.resource.data.user_b == me())
+        && request.resource.data.user_a < request.resource.data.user_b
+        && fid == request.resource.data.user_a + '__' + request.resource.data.user_b
+        && exists(path('users', request.resource.data.user_a))
+        && exists(path('users', request.resource.data.user_b))
+        && !blocked(request.resource.data.user_a, request.resource.data.user_b);
+      allow delete: if signedIn() && (resource.data.user_a == me() || resource.data.user_b == me());
+      allow update: if false;
+    }
+
+    match /blocks/{bid} {
+      allow get: if member() && me() in bid.split('__');
+      allow list: if member() && (resource.data.blocker == me() || resource.data.blocked == me());
+      allow create: if member()
+        && request.resource.data.keys().hasOnly(['blocker', 'blocked', 'created_at'])
+        && request.resource.data.blocker == me()
+        && request.resource.data.blocked != me()
+        && bid == me() + '__' + request.resource.data.blocked;
+      allow delete: if signedIn() && (resource.data.blocker == me() || (resource.data.blocked == me() && deletingMyAccount()));
+      allow update: if false;
+    }
+
+    // ---------- games ----------
+
+    match /games/{gid} {
+      // Signed-in players can read games (friend profiles show a friend's games against others).
+      allow read: if member();
+
+      // Log a game: you're one of the players, the other is your friend, it's well-formed.
+      allow create: if member() && validGame(request.resource.data, gid)
+        && me() in request.resource.data.players
+        && request.resource.data.created_by == me()
+        && request.resource.data.deleted == false
+        && request.resource.data.last_request == ''
+        && friends(request.resource.data.player1_id, request.resource.data.player2_id);
+
+      // A saved game only changes when the other player approves a request, in the same batch
+      // as the approval (see requests below) — or is hidden when one of its players deletes their account.
+      allow update: if signedIn() && (applyingApprovedRequest(gid) || hidingForDeletedAccount());
+      allow delete: if false;
+    }
+
+    function validGame(g, gid) {
+      return g.keys().hasOnly(['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score',
+                               'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at',
+                               'updated_at', 'deleted', 'sport', 'player1_pens', 'player2_pens', 'players', 'last_request'])
+        && g.id == gid
+        && g.date is string && g.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && g.player1_id is string && g.player2_id is string && g.player1_id != g.player2_id
+        && g.players == [g.player1_id, g.player2_id]
+        && g.sport in ['2k', 'fifa']
+        && g.player1_score is int && g.player2_score is int
+        && g.player1_score >= 0 && g.player2_score >= 0 && g.player1_score <= 999 && g.player2_score <= 999
+        && (g.sport == 'fifa' || g.player1_score != g.player2_score)
+        && g.player1_team is string && g.player2_team is string
+        && g.overtime is bool && g.note is string && g.note.size() <= 120
+        && (g.player1_pens == '' || g.player1_pens is int)
+        && (g.player2_pens == '' || g.player2_pens is int)
+        && g.deleted is bool;
+    }
+
+    function applyingApprovedRequest(gid) {
+      let rid = request.resource.data.last_request;
+      let before = get(path('requests', rid)).data;
+      let after = getAfter(path('requests', rid)).data;
+      let g = request.resource.data;
+      return rid is string && rid != resource.data.last_request
+        && before.status == 'pending' && after.status == 'approved'
+        && after.to_id == me() && after.game_id == gid
+        && g.id == resource.data.id && g.players == resource.data.players
+        && g.created_by == resource.data.created_by && g.created_at == resource.data.created_at
+        && (after.kind == 'delete'
+              ? onlyChanged(['deleted', 'updated_at', 'last_request']) && g.deleted == true
+              : g.deleted == false && validGame(g, gid)
+                && g.date == after.game.date
+                && g.player1_score == after.game.player1_score && g.player2_score == after.game.player2_score
+                && g.player1_team == after.game.player1_team && g.player2_team == after.game.player2_team
+                && g.overtime == after.game.overtime && g.note == after.game.note && g.sport == after.game.sport
+                && g.player1_pens == after.game.player1_pens && g.player2_pens == after.game.player2_pens);
+    }
+
+    function hidingForDeletedAccount() {
+      return deletingMyAccount() && me() in resource.data.players
+        && onlyChanged(['deleted', 'updated_at']) && request.resource.data.deleted == true;
+    }
+
+    // ---------- edit / delete requests ----------
+
+    match /requests/{rid} {
+      allow read: if member() && (resource.data.from_id == me() || resource.data.to_id == me());
+
+      // Ask to edit or delete a saved game you played in; it goes to the other player.
+      allow create: if member() && validRequest(request.resource.data)
+        && request.resource.data.status == 'pending';
+
+      allow update: if member() && (
+        // the other player answers
+        (resource.data.to_id == me() && resource.data.status == 'pending'
+          && request.resource.data.status in ['approved', 'declined']
+          && onlyChanged(['status', 'resolved_at']))
+        // you cancel your own request
+        || (resource.data.from_id == me() && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && onlyChanged(['status', 'resolved_at']))
+        // you replace your own open request (e.g. a newer edit)
+        || (resource.data.from_id == me() && resource.data.status == 'pending'
+          && validRequest(request.resource.data) && request.resource.data.status == 'pending'
+          && request.resource.data.game_id == resource.data.game_id)
+      );
+      allow delete: if signedIn() && (resource.data.from_id == me() || resource.data.to_id == me()) && deletingMyAccount();
+    }
+
+    function validRequest(r) {
+      let game = get(path('games', r.game_id)).data;
+      return r.keys().hasOnly(['game_id', 'from_id', 'to_id', 'kind', 'game', 'status', 'created_at', 'resolved_at'])
+        && r.from_id == me() && me() in game.players && game.deleted == false
+        && r.to_id in game.players && r.to_id != me()
+        && r.kind in ['edit', 'delete']
+        && (r.kind == 'delete'
+              ? r.game == null
+              : r.game is map && r.game.player1_id == game.player1_id && r.game.player2_id == game.player2_id)
+        && r.created_at is string;
+    }
+  }
+}

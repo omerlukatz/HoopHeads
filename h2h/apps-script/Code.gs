@@ -246,12 +246,241 @@ function pickTeams_(n) {
 }
 
 /* =====================================================================
+ * MOVE TO FIREBASE
+ * Run exportToFirestore (then verifyFirestore) from the editor. The Sheet itself is only read.
+ * ===================================================================== */
+
+const FIREBASE_PROJECT = 'dubs-d46eb';
+const FIREBASE_EMAIL_DOMAIN = 'users.hoophead.xyz';
+const FS_DOCS = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_PROJECT + '/databases/(default)/documents';
+const IDT = 'https://identitytoolkit.googleapis.com/v1/projects/' + FIREBASE_PROJECT;
+
+/**
+ * Copies every user, username, friendship, block, game (including deleted ones) and request from
+ * this Sheet into Firestore, with the same ids, and gives each player a Firebase login (with a
+ * random password until their first sign-in in the new app). Safe to run again: it makes
+ * Firestore an exact copy of the Sheet, keeping who has already signed in to the new app.
+ * Don't run it after the app has switched to Firebase (it refuses), or newer data would be lost.
+ */
+function exportToFirestore() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('FIREBASE_LIVE') === 'yes') throw new Error('The app already runs on Firebase. Copying the Sheet again would overwrite newer data.');
+  const counts = withLock_(function () { // fresh reads, and no writes from the app while copying
+    const users = readObjects_('Users');
+    const docs = {}; // full document path → fields
+
+    // Players and their logins
+    users.forEach(function (u) {
+      ensureFirebaseLogin_(u.id);
+      docs['users/' + u.id] = {
+        username: String(u.username), display_name: niceName_(u.display_name), color: String(u.color || '#5856D6'),
+        initial: String(u.initial || niceName_(u.display_name).charAt(0) || '?').toUpperCase(), avatar: String(u.avatar || ''),
+        created_at: text_(u.created_at), migrated: true,
+      };
+    });
+    // Usernames, keeping the "already signed in to the new app" flag
+    const claimedNow = {};
+    listDocs_('usernames').forEach(function (d) { claimedNow[d.id] = d.fields.claimed && d.fields.claimed.booleanValue === true; });
+    users.forEach(function (u) { docs['usernames/' + String(u.username).toLowerCase()] = { userId: u.id, claimed: claimedNow[String(u.username).toLowerCase()] === true }; });
+
+    readObjects_('Friendships').forEach(function (f) {
+      const pair = [String(f.user_a), String(f.user_b)].sort();
+      docs['friendships/' + pair[0] + '__' + pair[1]] = { user_a: pair[0], user_b: pair[1], created_at: text_(f.created_at) };
+    });
+    readObjects_('Blocks').forEach(function (b) {
+      docs['blocks/' + b.blocker + '__' + b.blocked] = { blocker: String(b.blocker), blocked: String(b.blocked), created_at: text_(b.created_at) };
+    });
+    readObjects_('Games').map(normalizeGame_).filter(function (g) { return g.id; }).forEach(function (g) {
+      docs['games/' + g.id] = {
+        id: g.id, date: g.date, player1_id: g.player1_id, player2_id: g.player2_id,
+        player1_score: g.player1_score, player2_score: g.player2_score, player1_team: g.player1_team, player2_team: g.player2_team,
+        overtime: g.overtime, note: g.note, created_by: g.created_by, created_at: g.created_at, updated_at: g.updated_at,
+        deleted: g.deleted, sport: g.sport, player1_pens: g.player1_pens, player2_pens: g.player2_pens,
+        players: [g.player1_id, g.player2_id], last_request: '',
+      };
+    });
+    readObjects_('Requests').map(publicRequest_).forEach(function (r) {
+      docs['requests/' + r.id] = { game_id: r.game_id, from_id: r.from_id, to_id: r.to_id, kind: r.kind, game: r.game, status: r.status, created_at: r.created_at, resolved_at: r.resolved_at };
+    });
+
+    // Make Firestore an exact copy: write everything, remove what's no longer in the Sheet
+    const writes = Object.keys(docs).map(function (path) {
+      return { update: { name: fsName_(path), fields: fsFields_(docs[path]) } };
+    });
+    ['users', 'usernames', 'friendships', 'blocks', 'games', 'requests'].forEach(function (coll) {
+      listDocs_(coll).forEach(function (d) { if (!docs[coll + '/' + d.id]) writes.push({ delete: fsName_(coll + '/' + d.id) }); });
+    });
+    for (let i = 0; i < writes.length; i += 400) firestore_('post', FS_DOCS + ':commit', { writes: writes.slice(i, i + 400) });
+
+    const tally = {};
+    Object.keys(docs).forEach(function (path) { const c = path.split('/')[0]; tally[c] = (tally[c] || 0) + 1; });
+    return tally;
+  });
+  Logger.log('Copied to Firestore: ' + JSON.stringify(counts) + '. Now run verifyFirestore.');
+}
+
+/**
+ * Compares the Sheet with Firestore, record by record: every user, friendship, block, game and
+ * request must be there with the same key fields. Logs "All good" or every difference.
+ */
+function verifyFirestore() {
+  const problems = [];
+  const fs = {};
+  ['users', 'usernames', 'friendships', 'blocks', 'games', 'requests'].forEach(function (coll) {
+    fs[coll] = {};
+    listDocs_(coll).forEach(function (d) { fs[coll][d.id] = fromFields_(d.fields); });
+  });
+  const check = function (label, coll, id, expected) {
+    const got = fs[coll][id];
+    if (!got) return problems.push(label + ' missing in Firestore: ' + coll + '/' + id);
+    Object.keys(expected).forEach(function (k) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(expected[k])) problems.push(label + ' ' + coll + '/' + id + ': ' + k + ' is ' + JSON.stringify(got[k]) + ', Sheet has ' + JSON.stringify(expected[k]));
+    });
+  };
+  const users = readObjects_('Users');
+  users.forEach(function (u) {
+    check('User', 'users', u.id, { username: String(u.username) });
+    check('Username', 'usernames', String(u.username).toLowerCase(), { userId: u.id });
+    if (!PropertiesService.getScriptProperties().getProperty('fbuid:' + u.id)) problems.push('No Firebase login for ' + u.username);
+  });
+  const friendships = readObjects_('Friendships');
+  friendships.forEach(function (f) { const p = [String(f.user_a), String(f.user_b)].sort(); check('Friendship', 'friendships', p[0] + '__' + p[1], { user_a: p[0], user_b: p[1] }); });
+  const blocks = readObjects_('Blocks');
+  blocks.forEach(function (b) { check('Block', 'blocks', b.blocker + '__' + b.blocked, { blocker: String(b.blocker) }); });
+  const games = readObjects_('Games').map(normalizeGame_).filter(function (g) { return g.id; });
+  games.forEach(function (g) {
+    check('Game', 'games', g.id, { date: g.date, player1_id: g.player1_id, player2_id: g.player2_id, player1_score: g.player1_score, player2_score: g.player2_score, player1_team: g.player1_team, player2_team: g.player2_team, deleted: g.deleted, sport: g.sport });
+  });
+  const requests = readObjects_('Requests');
+  requests.forEach(function (r) { check('Request', 'requests', String(r.id), { status: String(r.status) }); });
+  const sheet = { users: users.length, friendships: friendships.length, blocks: blocks.length, games: games.length, requests: requests.length };
+  Object.keys(sheet).forEach(function (c) {
+    const n = Object.keys(fs[c]).length;
+    if (n !== sheet[c]) problems.push(c + ': Sheet has ' + sheet[c] + ', Firestore has ' + n);
+  });
+  Logger.log('Sheet: ' + JSON.stringify(sheet) + ' (' + games.filter(function (g) { return !g.deleted; }).length + ' games not deleted)');
+  Logger.log(problems.length ? problems.length + ' problem(s):\n' + problems.join('\n') : 'All good: Firestore matches the Sheet exactly.');
+}
+
+/**
+ * First sign-in in the Firebase version of the app: checks the PIN against this Sheet (with the
+ * usual wrong-PIN lockout) and, if it's right, sets the player's Firebase password from it.
+ */
+function claimFirebase_(username, pin) {
+  const name = String(username || '').trim().toLowerCase();
+  const user = withLock_(function () {
+    const props = PropertiesService.getScriptProperties();
+    const key = 'fails:' + name;
+    const fails = JSON.parse(props.getProperty(key) || '{"count":0,"lockedUntil":0}');
+    if (fails.lockedUntil > Date.now()) {
+      throw apiError_('Too many attempts.', 'locked', { retryAfter: Math.ceil((fails.lockedUntil - Date.now()) / 1000) });
+    }
+    const found = findUserByUsername_(name);
+    if (!found || !/^\d{4}$/.test(String(pin)) || hash_(found.user.id, String(pin)) !== found.user.pin_hash) {
+      fails.count += 1;
+      if (fails.count >= MAX_TRIES) {
+        props.setProperty(key, JSON.stringify({ count: 0, lockedUntil: Date.now() + LOCK_MINUTES * 60000 }));
+        throw apiError_('Too many attempts.', 'locked', { retryAfter: LOCK_MINUTES * 60 });
+      }
+      props.setProperty(key, JSON.stringify(fails));
+      throw apiError_('Wrong username or PIN.', 'auth', { triesLeft: MAX_TRIES - fails.count });
+    }
+    props.deleteProperty(key);
+    return found.user;
+  });
+  const uid = PropertiesService.getScriptProperties().getProperty('fbuid:' + user.id);
+  if (!uid) throw apiError_('Your account hasn’t been moved to the new system yet.', 'server');
+  identity_('post', IDT + '/accounts:update', { localId: uid, password: 'dubs:' + pin + ':' + user.id });
+  firestore_('patch', FS_DOCS + '/usernames/' + encodeURIComponent(name) + '?updateMask.fieldPaths=claimed', { fields: { claimed: { booleanValue: true } } });
+  return {};
+}
+
+/** Makes sure a player has a Firebase login "<id>@users.hoophead.xyz" and remembers its uid. */
+function ensureFirebaseLogin_(userId) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('fbuid:' + userId)) return;
+  const email = userId + '@' + FIREBASE_EMAIL_DOMAIN;
+  let uid;
+  const made = identity_('post', IDT + '/accounts', { email: email, password: Utilities.getUuid() + Utilities.getUuid() }, true);
+  if (made.localId) uid = made.localId;
+  else {
+    const found = identity_('post', IDT + '/accounts:lookup', { email: [email] });
+    uid = found.users && found.users[0] && found.users[0].localId;
+  }
+  if (!uid) throw new Error('Couldn’t create a Firebase login for ' + userId);
+  props.setProperty('fbuid:' + userId, uid);
+}
+
+function google_(method, url, body, allowError) {
+  const res = UrlFetchApp.fetch(url, {
+    method: method,
+    contentType: 'application/json',
+    // x-goog-user-project: count the call against the Firebase project (where these APIs are on)
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'x-goog-user-project': FIREBASE_PROJECT },
+    payload: body ? JSON.stringify(body) : undefined,
+    muteHttpExceptions: true,
+  });
+  const json = JSON.parse(res.getContentText() || '{}');
+  if (res.getResponseCode() >= 300 && !allowError) throw new Error(method.toUpperCase() + ' ' + url.split('?')[0] + ' → ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+  return json;
+}
+const firestore_ = google_;
+const identity_ = google_;
+
+function fsName_(path) {
+  return 'projects/' + FIREBASE_PROJECT + '/databases/(default)/documents/' + path;
+}
+
+/** Every document in a collection as { id, fields }. */
+function listDocs_(coll) {
+  const out = [];
+  let token = '';
+  do {
+    const page = firestore_('get', FS_DOCS + '/' + coll + '?pageSize=300' + (token ? '&pageToken=' + encodeURIComponent(token) : ''));
+    (page.documents || []).forEach(function (d) { out.push({ id: d.name.split('/').pop(), fields: d.fields || {} }); });
+    token = page.nextPageToken || '';
+  } while (token);
+  return out;
+}
+
+function fsValue_(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(fsValue_) } };
+  if (typeof v === 'object') return { mapValue: { fields: fsFields_(v) } };
+  return { stringValue: String(v) };
+}
+function fsFields_(obj) {
+  const fields = {};
+  Object.keys(obj).forEach(function (k) { fields[k] = fsValue_(obj[k]); });
+  return fields;
+}
+function fromValue_(v) {
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue' in v) return null;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromValue_);
+  if ('mapValue' in v) return fromFields_(v.mapValue.fields || {});
+  return null;
+}
+function fromFields_(fields) {
+  const out = {};
+  Object.keys(fields || {}).forEach(function (k) { out[k] = fromValue_(fields[k]); });
+  return out;
+}
+function text_(v) { return v instanceof Date ? v.toISOString() : String(v == null ? '' : v); }
+
+/* =====================================================================
  * HTTP ENTRY POINTS
  * ===================================================================== */
 
 function doGet(e) {
   return respond_(function () {
     const p = (e && e.parameter) || {};
+    refuseIfMoved_(p.action);
     const me = requireSession_(p.token);
     switch (p.action) {
       case 'bootstrap': return bootstrap_(me);
@@ -270,9 +499,11 @@ function doPost(e) {
   return respond_(function () {
     // The app sends Content-Type text/plain (avoids a CORS preflight), so parse the raw body.
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    refuseIfMoved_(body.action);
     switch (body.action) {
       case 'signUp': return signUp_(body.username, body.displayName, body.pin);
       case 'signIn': return signIn_(body.username, body.pin);
+      case 'claimFirebase': return claimFirebase_(body.username, body.pin);
       case 'signOut': return signOut_(body.token);
       case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName, body.avatar);
       case 'changePin': return changePin_(requireSession_(body.token), body.currentPin, body.newPin);
@@ -291,6 +522,19 @@ function doPost(e) {
       default: throw apiError_('Unknown action.', 'invalid');
     }
   });
+}
+
+/**
+ * Once the app runs on Firebase (Script Property FIREBASE_LIVE = yes), this Sheet is a frozen backup:
+ * an old copy of the app still open on a phone gets told to reopen, and nothing new lands here
+ * (its unsent games stay on the phone and go to Firebase after the update). Only the one-time
+ * PIN check for moving an account (claimFirebase) keeps working.
+ */
+function refuseIfMoved_(action) {
+  if (action === 'claimFirebase') return;
+  if (PropertiesService.getScriptProperties().getProperty('FIREBASE_LIVE') === 'yes') {
+    throw apiError_('Dubs just got faster! Close the app completely and open it again to update.', 'moved');
+  }
 }
 
 /* =====================================================================

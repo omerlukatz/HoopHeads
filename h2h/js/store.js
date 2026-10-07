@@ -14,7 +14,7 @@ import { sportOf } from './stats.js';
 import { CONFIG } from '../config.js';
 
 // Keys are namespaced by backend, so demo data never mixes with the real Sheet.
-const NS = api.isDemo ? 'demo' : CONFIG.APPS_SCRIPT_URL.split('/s/')[1]?.slice(0, 16) || 'remote';
+const NS = api.isFirebase ? 'firebase' : api.isDemo ? 'demo' : CONFIG.APPS_SCRIPT_URL.split('/s/')[1]?.slice(0, 16) || 'remote';
 const K = {
   session: `h2h.session.v3.${NS}`,
   accounts: `h2h.accounts.v3.${NS}`,
@@ -30,6 +30,33 @@ const read = (key, fallback) => {
   }
 };
 const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+
+// Moving from the Sheet to Firebase (same user ids): bring this phone's saved accounts, app lock,
+// cached games and unsent new games across once. The old session isn't copied: everyone signs in
+// once with their PIN. Edits/deletes still queued for the Sheet are dropped (they now need approval).
+(function carryOverFromSheet() {
+  if (!api.isFirebase || !CONFIG.APPS_SCRIPT_URL) return;
+  const done = `h2h.carried.v3.${NS}`;
+  if (localStorage.getItem(done)) return;
+  const OLD = CONFIG.APPS_SCRIPT_URL.split('/s/')[1]?.slice(0, 16) || 'remote';
+  try {
+    for (const name of ['accounts', 'prefs']) {
+      const from = `h2h.${name}.v3.${OLD}`;
+      if (localStorage.getItem(from) != null && localStorage.getItem(K[name]) == null) localStorage.setItem(K[name], localStorage.getItem(from));
+    }
+    for (const key of Object.keys(localStorage)) {
+      const kind = ['cache', 'outbox'].find((k) => key.startsWith(`h2h.${k}.v3.${OLD}.`));
+      if (!kind) continue;
+      const to = K[kind](key.slice(`h2h.${kind}.v3.${OLD}.`.length));
+      if (localStorage.getItem(to) != null) continue;
+      if (kind === 'cache') localStorage.setItem(to, localStorage.getItem(key));
+      else write(to, read(key, []).filter((op) => op.isNew));
+    }
+  } catch {
+    /* storage full or blocked: the app still works, just without the carried-over data */
+  }
+  localStorage.setItem(done, '1');
+})();
 
 export const state = {
   session: read(K.session, null), // { token, userId }

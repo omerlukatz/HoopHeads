@@ -1,11 +1,11 @@
 // Service worker: the app shell opens from the cache instantly and refreshes in the background;
 // logos, crests, avatars and icons are cache-first (they never change between releases).
-// Requests to Google (the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v28';
+// Requests to Google (Firebase, and the Apps Script API) are cross-origin and never touched here.
+const VERSION = 'h2h-v29';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
-  'config.js', 'css/tokens.css', 'css/app.css',
-  'js/app.js', 'js/ui.js', 'js/api.js', 'js/demo.js', 'js/store.js', 'js/lock.js', 'js/stats.js', 'js/teams.js', 'js/sample.js', 'js/crypto.js', 'js/chart.js', 'js/clubs.js',
+  'config.js', 'firebase-config.js', 'css/tokens.css', 'css/app.css',
+  'js/app.js', 'js/ui.js', 'js/api.js', 'js/demo.js', 'js/store.js', 'js/lock.js', 'js/stats.js', 'js/teams.js', 'js/sample.js', 'js/crypto.js', 'js/chart.js', 'js/clubs.js', 'js/firebase-backend.js',
   'assets/icons/icon-192.png', 'assets/icons/apple-touch-icon.png',
 ];
 const TEAMS = ['atl','bos','bkn','cha','chi','cle','dal','den','det','gsw','hou','ind','lac','lal','mem',

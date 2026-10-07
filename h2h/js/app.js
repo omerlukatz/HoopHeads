@@ -1,7 +1,7 @@
 import { getTeam, searchTeams, teamsFor, FIFA_GROUPS, CLUBS } from './teams.js';
 import * as store from './store.js';
 import { state } from './store.js';
-import { isDemo, demoControls } from './api.js';
+import { isDemo, isFirebase, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, sportOf, CLUTCH_TESTS, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, AVATARS, changePinFlow, confirmPinFlow } from './lock.js';
@@ -824,7 +824,7 @@ function renderSettings() {
     </ul>
     <p class="group__foot">Permanently deletes your profile, friends and requests, and removes your games from your friends’ stats. You’ll need your PIN.</p>
   </section>
-  <p class="group__foot group__foot--center">Dubs 2.0 · ${isDemo ? 'Demo mode' : 'Synced with Google Sheets'}</p>`;
+  <p class="group__foot group__foot--center">Dubs 2.0 · ${isDemo ? 'Demo mode' : isFirebase ? 'Synced with Firebase' : 'Synced with Google Sheets'}</p>`;
 }
 
 function initSettings() {
