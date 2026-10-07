@@ -555,6 +555,12 @@ function syncIfStale() {
   if (!state.lastSynced || Date.now() - Date.parse(state.lastSynced) > 10000 || outbox.length) sync();
 }
 window.addEventListener('online', () => sync());
+// A friend logged a game or answered a request: show it now rather than at the next poll
+let pushed = null;
+api.onRemoteChange(() => {
+  clearTimeout(pushed);
+  pushed = setTimeout(() => state.session && sync(), 300);
+});
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && syncIfStale());
 
 // Last, so everything above (prefs, game mode) is defined before the cached account loads

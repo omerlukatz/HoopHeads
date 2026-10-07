@@ -137,5 +137,8 @@ const remote = {
 
 const backend = isFirebase ? createFirebaseBackend(ApiError) : isDemo ? demo.createDemoBackend(ApiError) : remote;
 
+/** Firebase pushes changes as they happen; the Sheet backend has no way to, so this does nothing there. */
+export const onRemoteChange = backend.onRemoteChange || (() => () => {});
+
 export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount } = backend;
 export const demoControls = isDemo ? demo.controls : null;

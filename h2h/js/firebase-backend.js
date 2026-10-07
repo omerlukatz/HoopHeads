@@ -126,40 +126,152 @@ export function createFirebaseBackend(ApiError) {
   async function gamesOf(f, userId) {
     return (await where(f, 'games', 'players', 'array-contains', userId)).filter((g) => !g.deleted).map(gameOut);
   }
-  async function requestsOf(f, me) {
-    const since = new Date(Date.now() - REQUEST_DAYS * 86400000).toISOString();
-    const [from, to] = await Promise.all([where(f, 'requests', 'from_id', '==', me), where(f, 'requests', 'to_id', '==', me)]);
-    return [...from, ...to].filter((r) => r.status === 'pending' || ((r.status === 'approved' || r.status === 'declined') && String(r.resolved_at) >= since));
+
+  // ---------- live data ----------
+  // Every document read counts against Firestore's free daily quota, so instead of re-reading
+  // everything on each refresh, listeners stay open while you're signed in: your data is read once,
+  // then Firestore only sends (and counts) documents that change. Refreshes read from these
+  // listeners for free, and a change from a friend shows up at once (see onRemoteChange).
+
+  let live = null;
+  const changeListeners = new Set();
+  const notifyChange = () => changeListeners.forEach((fn) => fn());
+
+  function stopLive() {
+    live?.stop();
+    live = null;
   }
+
+  function startLive(f, me) {
+    const parts = { me: undefined, fa: undefined, fb: undefined, games: undefined, rf: undefined, rt: undefined };
+    const friendDocs = new Map();
+    let friendKey = null;
+    let friendUnsubs = [];
+    let friendsReady = false;
+    let resolveReady;
+    const session = { me, failed: null, ready: new Promise((r) => (resolveReady = r)) };
+    let initial = true;
+
+    const settled = () => Object.values(parts).every((v) => v !== undefined) && friendsReady;
+    const changed = () => {
+      if (initial) {
+        if (settled()) (initial = false), resolveReady();
+      } else notifyChange();
+    };
+    const fail = (err) => {
+      session.failed = err;
+      resolveReady();
+      if (live === session) stopLive(); // the next refresh starts over (or reports the error)
+    };
+    const docs = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    function watchFriends() {
+      if (parts.fa === undefined || parts.fb === undefined) return;
+      const ids = [...new Set([...parts.fa.map((x) => x.user_b), ...parts.fb.map((x) => x.user_a)])].sort();
+      if (ids.join() === friendKey) return;
+      friendKey = ids.join();
+      friendUnsubs.forEach((off) => off());
+      friendDocs.clear();
+      const parts30 = chunk(ids, 30);
+      const seen = new Set();
+      friendsReady = parts30.length === 0;
+      friendUnsubs = parts30.map((part, i) => f.onSnapshot(f.query(f.collection(f.db, 'users'), f.where(f.documentId(), 'in', part)), (snap) => {
+        part.forEach((id) => friendDocs.delete(id));
+        snap.forEach((d) => friendDocs.set(d.id, pub(d.id, d.data())));
+        seen.add(i);
+        if (seen.size === parts30.length) friendsReady = true;
+        changed();
+      }, fail));
+    }
+
+    const listen = (key, q) => f.onSnapshot(q, (snap) => {
+      parts[key] = key === 'me' ? (snap.exists() ? pub(me, snap.data()) : null) : docs(snap);
+      if (key === 'fa' || key === 'fb') watchFriends();
+      changed();
+    }, fail);
+    const qWhere = (coll, field, op, value) => f.query(f.collection(f.db, coll), f.where(field, op, value));
+    const unsubs = [
+      listen('me', ref(f, 'users', me)),
+      listen('fa', qWhere('friendships', 'user_a', '==', me)),
+      listen('fb', qWhere('friendships', 'user_b', '==', me)),
+      listen('games', qWhere('games', 'players', 'array-contains', me)),
+      listen('rf', qWhere('requests', 'from_id', '==', me)),
+      listen('rt', qWhere('requests', 'to_id', '==', me)),
+    ];
+    watchFriends();
+
+    session.stop = () => {
+      [...unsubs, ...friendUnsubs].forEach((off) => off());
+      session.failed ||= new ApiError('Your session has ended. Sign in again.', 'auth');
+      resolveReady();
+    };
+    /** The current data, in the same shape bootstrap returns. */
+    session.read = async () => {
+      if (!parts.me) throw new ApiError('This account no longer exists.', 'auth');
+      const ids = friendKey ? friendKey.split(',') : [];
+      const missing = ids.filter((id) => !friendDocs.has(id)); // a brand-new friend, still loading
+      const extra = missing.length ? await usersByIds(f, missing) : [];
+      const since = new Date(Date.now() - REQUEST_DAYS * 86400000).toISOString();
+      return {
+        me: parts.me,
+        friends: [...ids.map((id) => friendDocs.get(id)).filter(Boolean), ...extra],
+        games: parts.games.filter((g) => !g.deleted).map(gameOut),
+        requests: [...parts.rf, ...parts.rt].filter((r) => r.status === 'pending' || ((r.status === 'approved' || r.status === 'declined') && String(r.resolved_at) >= since)),
+      };
+    };
+    return session;
+  }
+
+  /** Your profile, friends, games and requests, from the listeners (started on first use). */
   async function snapshot(f, me) {
-    const [meUser, friendIds, games, requests] = await Promise.all([userDoc(f, me), friendIdsOf(f, me), gamesOf(f, me), requestsOf(f, me)]);
-    if (!meUser) throw new ApiError('This account no longer exists.', 'auth');
-    return { me: meUser, friends: await usersByIds(f, friendIds), games, requests };
+    if (live?.me !== me) {
+      stopLive();
+      live = startLive(f, me);
+    }
+    const session = live;
+    // The first load can stall on a bad connection; give up after a while (the listeners keep
+    // trying, and the next refresh picks up whatever has arrived by then)
+    let timer;
+    const slow = new Promise((_, reject) => (timer = setTimeout(() => reject(new ApiError('Couldn’t reach the server. Try again in a moment.', 'timeout')), 20000)));
+    try {
+      await Promise.race([session.ready, slow]);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (session.failed) throw session.failed;
+    return session.read();
   }
 
   // ---------- accounts ----------
 
-  /** First sign-in after the move: the old Apps Script checks the PIN and sets the Firebase password. */
+  /**
+   * First sign-in after the move: the old Apps Script checks the PIN and sets the Firebase password.
+   * Apps Script often answers with a broken redirect (an error page without CORS headers) instead
+   * of its result, so this is retried a few times. Safe: claiming sets the same password each time.
+   */
   async function claim(username, pin) {
     if (!CONFIG.APPS_SCRIPT_URL) throw new ApiError('Wrong username or PIN.', 'auth');
-    let res;
-    try {
-      res = await fetch(CONFIG.APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'claimFirebase', username, pin }),
-        redirect: 'follow',
-      });
-    } catch {
-      throw new ApiError('Couldn’t reach the server. Try again in a moment.', 'timeout');
+    for (let attempt = 0; ; attempt++) {
+      let json = null;
+      try {
+        const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'claimFirebase', username, pin }),
+          redirect: 'follow',
+        });
+        json = await res.json();
+      } catch {
+        /* no answer: try again below */
+      }
+      if (json) {
+        if (!json.ok) throw new ApiError(json.error || 'Wrong username or PIN.', json.code || 'auth', json);
+        return;
+      }
+      if (!navigator.onLine) throw new ApiError('You’re offline.', 'network');
+      if (attempt >= 4) throw new ApiError('Couldn’t reach the server. Try again in a moment.', 'timeout');
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
-    let json;
-    try {
-      json = await res.json();
-    } catch {
-      throw new ApiError('Couldn’t reach the server. Try again in a moment.', 'timeout');
-    }
-    if (!json.ok) throw new ApiError(json.error || 'Wrong username or PIN.', json.code || 'auth', json);
   }
 
   async function signIn(username, pin) {
@@ -169,6 +281,7 @@ export function createFirebaseBackend(ApiError) {
       const entry = await f.getDoc(ref(f, 'usernames', name));
       if (!entry.exists()) throw new ApiError('Wrong username or PIN.', 'auth');
       const { userId, claimed } = entry.data();
+      stopLive();
       try {
         await f.signInWithEmailAndPassword(f.auth, emailOf(userId), passwordOf(pin, userId));
       } catch (err) {
@@ -192,6 +305,7 @@ export function createFirebaseBackend(ApiError) {
       if ((await f.getDoc(ref(f, 'usernames', name))).exists()) throw new ApiError('That username is taken.', 'taken');
       const bytes = crypto.getRandomValues(new Uint8Array(8));
       const id = `u_${[...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+      stopLive();
       const cred = await f.createUserWithEmailAndPassword(f.auth, emailOf(id), passwordOf(pin, id));
       const h = [...name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0);
       const profile = { username: name, display_name: display, color: AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length], initial: display[0].toUpperCase(), avatar: '', created_at: now() };
@@ -209,7 +323,7 @@ export function createFirebaseBackend(ApiError) {
     });
   }
 
-  const signOut = () => run((f) => f.signOut(f.auth)).catch(() => ({}));
+  const signOut = () => run((f) => (stopLive(), f.signOut(f.auth))).catch(() => ({}));
 
   async function reauth(f, pin) {
     const id = meOf(f);
@@ -277,6 +391,7 @@ export function createFirebaseBackend(ApiError) {
   async function deleteAccount(token, pin) {
     return run(async (f) => {
       const id = await reauth(f, pin);
+      stopLive(); // its listeners would fail once the profile is gone
       const profile = await f.getDoc(ref(f, 'users', id));
       const [friendsA, friendsB, blocksMine, blocksTheirs, reqFrom, reqTo, games] = await Promise.all([
         where(f, 'friendships', 'user_a', '==', id),
@@ -311,18 +426,22 @@ export function createFirebaseBackend(ApiError) {
 
   const bootstrap = (token) => run(async (f) => snapshot(f, meOf(f)));
   const getMe = (token) => run(async (f) => (await snapshot(f, meOf(f))).me);
-  const getFriends = (token) => run(async (f) => usersByIds(f, await friendIdsOf(f, meOf(f))));
-  const getGames = (token) => run(async (f) => gamesOf(f, meOf(f)));
+  const getFriends = (token) => run(async (f) => (await snapshot(f, meOf(f))).friends);
+  const getGames = (token) => run(async (f) => (await snapshot(f, meOf(f))).games);
 
+  let everyone = null;
   async function searchUsers(token, query) {
     const q = String(query || '').trim().toLowerCase().replace(/^@/, '');
     if (q.length < 2) return [];
     return run(async (f) => {
       const me = meOf(f);
-      const [all, friends, hidden] = await Promise.all([f.getDocs(f.collection(f.db, 'users')), friendIdsOf(f, me), blockedEitherWay(f, me)]);
-      return all.docs
-        .filter((d) => d.id !== me && !hidden.includes(d.id))
-        .map((d) => pub(d.id, d.data()))
+      // Searching reads every profile, so the list is kept for a couple of minutes while you type
+      if (!everyone || Date.now() - everyone.at > 120000) {
+        everyone = { at: Date.now(), users: (await f.getDocs(f.collection(f.db, 'users'))).docs.map((d) => pub(d.id, d.data())) };
+      }
+      const [friends, hidden] = await Promise.all([friendIdsOf(f, me), blockedEitherWay(f, me)]);
+      return everyone.users
+        .filter((u) => u.id !== me && !hidden.includes(u.id))
         .filter((u) => u.username.toLowerCase().includes(q) || u.display_name.toLowerCase().includes(q))
         .slice(0, 20)
         .map((u) => ({ ...u, isFriend: friends.includes(u.id) }));
@@ -536,8 +655,14 @@ export function createFirebaseBackend(ApiError) {
     });
   }
 
+  /** Calls `fn` whenever your data changes on the server; returns an unsubscribe function. */
+  function onRemoteChange(fn) {
+    changeListeners.add(fn);
+    return () => changeListeners.delete(fn);
+  }
+
   return {
-    signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
+    onRemoteChange, signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
     addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames,
     addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount,
   };
