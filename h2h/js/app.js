@@ -148,8 +148,18 @@ document.addEventListener('keydown', (e) => {
 /** #screen or #friends/<userId> */
 function route() {
   const [screen, sub] = location.hash.slice(1).split('/');
+  if (screen === 'notifications') {
+    // A tapped push notification about a request: the Friends tab, with Notifications open on top
+    show('friends');
+    history.replaceState(history.state, '', '#friends');
+    if (started && state.session && !isLocked()) openNotifications();
+    else pendingNotifications = true; // opens once the app has started (and been unlocked)
+    return;
+  }
   show(screen || 'dashboard', screen === 'friends' ? sub || null : undefined);
 }
+let started = false;
+let pendingNotifications = false;
 
 // ---------- large title → inline title on scroll ----------
 
@@ -753,6 +763,7 @@ function renderSettings() {
 
   const modes = [['2k', 'NBA 2K'], ['fifa', 'FIFA']];
   const modeIndex = modes.findIndex(([id]) => id === state.mode);
+  const push = isFirebase ? store.pushStatus() : null;
   el.innerHTML = `
   <section class="group" aria-labelledby="set-mode">
     <div class="group__head"><h2 id="set-mode">Game Mode</h2></div>
@@ -764,6 +775,18 @@ function renderSettings() {
     </div>
     <p class="group__foot">Each game keeps its own stats. The app opens on whichever game you played last.</p>
   </section>
+
+  ${
+    push
+      ? `<section class="group" aria-labelledby="set-notif">
+    <div class="group__head"><h2 id="set-notif">Notifications</h2></div>
+    <ul class="list" role="list">
+      <li class="cell"><label for="push-toggle">Push Notifications</label><input type="checkbox" role="switch" class="switch" id="push-toggle"${push === 'on' ? ' checked' : ''}${push === 'on' || push === 'off' ? '' : ' disabled'}></li>
+    </ul>
+    <p class="group__foot">${PUSH_HELP[push]}</p>
+  </section>`
+      : ''
+  }
 
   <section class="group" aria-labelledby="set-account">
     <div class="group__head"><h2 id="set-account">Account</h2></div>
@@ -827,10 +850,40 @@ function renderSettings() {
   <p class="group__foot group__foot--center">Dubs 2.0 · ${isDemo ? 'Demo mode' : isFirebase ? 'Synced with Firebase' : 'Synced with Google Sheets'}</p>`;
 }
 
+const PUSH_HELP = {
+  on: 'You’ll get a notification when a friend logs a game against you, asks to change a game, answers your request or adds you.',
+  off: 'Get a notification when a friend logs a game against you, asks to change a game, answers your request or adds you.',
+  denied: 'Notifications are blocked for Dubs. To allow them, open your phone’s Settings, then Notifications, then Dubs.',
+  install: 'On iPhone, notifications work once Dubs is on your Home Screen: in Safari, tap Share, then Add to Home Screen, and open Dubs from there.',
+  unsupported: 'This browser can’t show notifications.',
+};
+
+/** Turns push notifications on or off for this phone (`on` must come straight from a tap). */
+async function setPush(on) {
+  try {
+    if (on) {
+      await store.enablePush();
+      haptic('success');
+      toast('Notifications on');
+    } else {
+      await store.disablePush();
+      toast('Notifications off');
+    }
+  } catch (err) {
+    haptic('warning');
+    toast(err.message || 'Couldn’t change notifications. Try again.');
+  }
+  if (ui.screen === 'settings') renderSettings();
+}
+
 function initSettings() {
   const root = $('#settings-content');
   root.addEventListener('change', async (e) => {
     const t = e.target;
+    if (t.id === 'push-toggle') {
+      t.disabled = true;
+      return setPush(t.checked);
+    }
     haptic('light');
     if (t.id === 'require-pin') store.setPrefs({ requirePin: t.checked });
     if (t.id === 'sample-toggle') {
@@ -1921,6 +1974,8 @@ function renderBell() {
   });
   $$('[data-bell-dot]').forEach((d) => (d.hidden = !badge));
   $$('.navbar__bell').forEach((b) => b.setAttribute('aria-label', badge ? `Notifications, ${badge} new` : 'Notifications'));
+  // The number on the Home Screen icon (where supported)
+  if ('setAppBadge' in navigator) (badge ? navigator.setAppBadge(badge) : navigator.clearAppBadge()).catch(() => {});
 }
 
 function openNotifications() {
@@ -1967,7 +2022,15 @@ function openNotifications() {
         <span class="notif-card__time">${esc(relativeTime(r.resolved_at))}</span>
       </article>`).join('');
     const section = (title, html) => (html ? `<section class="group"><div class="group__head"><h2>${title}</h2></div><div class="notif">${html}</div></section>` : '');
+    const pushCard =
+      isFirebase && store.pushStatus() === 'off'
+        ? `<article class="card notif-card notif-card--push">
+        <p class="notif-card__text"><strong>Get notified on your phone</strong> when a friend logs a game against you or asks to change one.</p>
+        <button type="button" class="btn btn--primary btn--block" data-push-on>Turn On Notifications</button>
+      </article>`
+        : '';
     body.innerHTML =
+      pushCard +
       section('Needs Your Approval', incoming) + section('Waiting on Friends', outgoing) + section('Recent', answered) ||
       `<p class="notif-empty">No notifications.<br>When a friend asks to edit or delete a game, it shows up here for you to approve.</p>`;
   };
@@ -1979,6 +2042,7 @@ function openNotifications() {
 
   content.addEventListener('click', async (e) => {
     if (e.target.closest('[data-sheet="done"]')) return sheet.close();
+    if (e.target.closest('[data-push-on]')) return setPush(true).then(paint);
     const respond = e.target.closest('[data-respond]');
     const cancel = e.target.closest('[data-cancel-req]');
     const btn = respond || cancel;
@@ -2360,6 +2424,11 @@ function afterUnlock() {
   show(ui.screen);
   render();
   store.startAutoSync();
+  started = true;
+  if (pendingNotifications) {
+    pendingNotifications = false;
+    openNotifications();
+  }
 }
 
 // Re-lock after 5+ minutes in the background when "Require PIN on open" is on

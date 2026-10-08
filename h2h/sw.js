@@ -1,7 +1,7 @@
 // Service worker: the app shell opens from the cache instantly and refreshes in the background;
 // logos, crests, avatars and icons are cache-first (they never change between releases).
 // Requests to Google (Firebase, and the Apps Script API) are cross-origin and never touched here.
-const VERSION = 'h2h-v31';
+const VERSION = 'h2h-v32';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'favicon.ico',
   'config.js', 'firebase-config.js', 'css/tokens.css', 'css/app.css',
@@ -65,5 +65,44 @@ self.addEventListener('fetch', (event) => {
   event.waitUntil(update.catch(() => {})); // keep the worker alive until the cache is refreshed
   event.respondWith(
     caches.match(request).then((hit) => hit || update.catch(() => (request.mode === 'navigate' ? caches.match('index.html') : undefined))),
+  );
+});
+
+// ---------- push notifications ----------
+// Sent through Firebase Cloud Messaging by the Apps Script (see notify_ in Code.gs) as data:
+// { title, body, url, tag }. Every push shows a notification (iPhones require it).
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    /* not JSON: show the generic text below */
+  }
+  const data = payload.data || payload;
+  const title = data.title || payload.notification?.title || 'Dubs';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || payload.notification?.body || '',
+      tag: data.tag || undefined, // a newer notification about the same thing replaces the older one
+      icon: 'assets/icons/icon-192.png',
+      badge: 'assets/icons/icon-192.png',
+      data: { url: data.url || './#dashboard' },
+    }),
+  );
+});
+
+// Tapping a notification opens Dubs (or brings it forward) on the screen it's about
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || './#dashboard', self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windows) => {
+      const open = windows.find((w) => w.url.startsWith(self.registration.scope));
+      if (open) {
+        await open.focus();
+        return open.navigate(url).catch(() => {});
+      }
+      return self.clients.openWindow(url);
+    }),
   );
 });

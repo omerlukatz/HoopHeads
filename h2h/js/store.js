@@ -393,6 +393,11 @@ export function markNotificationsSeen() {
 
 export const verifyPin = (pin) => api.verifyPin(state.session.token, pin);
 
+// ---------- push notifications (this phone) ----------
+export const pushStatus = () => (state.session ? api.pushStatus(state.session.userId) : 'off');
+export const enablePush = () => api.enablePush();
+export const disablePush = () => api.disablePush();
+
 export async function deleteAccount(pin) {
   try {
     await api.deleteAccount(state.session.token, pin);
@@ -545,6 +550,7 @@ async function syncOnce() {
 let timer = null;
 /** Refresh on open, on focus, when the connection returns, and every POLL_SECONDS while visible. */
 export function startAutoSync() {
+  api.refreshPush(); // keeps this phone's notification token current
   clearInterval(timer);
   timer = setInterval(() => document.visibilityState === 'visible' && sync(), CONFIG.POLL_SECONDS * 1000);
   syncIfStale();

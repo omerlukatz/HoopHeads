@@ -411,6 +411,114 @@ function ensureFirebaseLogin_(userId) {
   props.setProperty('fbuid:' + userId, uid);
 }
 
+/* ---------- push notifications ----------
+ * Right after you log a game ('game'), ask to change one ('request'), answer a request ('response')
+ * or add a friend ('friend'), the app posts { action: 'notify', idToken, kind, id }. This checks the
+ * Firebase sign-in token, re-reads the event from Firestore to make sure it's real, recent and
+ * yours, and sends the other player's phones a notification through Firebase Cloud Messaging.
+ * Phones that turned notifications on are in pushTokens (doc id = SHA-256 of the token).
+ */
+const FIREBASE_WEB_API_KEY = 'AIzaSyBtMKXnF5FTxnHjg9Ra6ZnkY6QeK0_fAw4'; // public (same as the app's)
+const NOTIFY_WINDOW_MS = 15 * 60 * 1000; // only about things that just happened
+const MODE_NAMES_ = { '2k': 'NBA 2K', fifa: 'FIFA' };
+
+function notify_(idToken, kind, id) {
+  const me = firebaseCaller_(idToken);
+  if (!me) throw apiError_('Your session has ended. Sign in again.', 'auth');
+  const key = ('notified:' + kind + ':' + id).slice(0, 240);
+  const cache = CacheService.getScriptCache();
+  if (cache.get(key)) return { sent: 0 }; // already sent (e.g. a retried request)
+  const msg = notification_(me, String(kind || ''), String(id || ''));
+  if (!msg) return { sent: 0 };
+  cache.put(key, '1', 21600);
+  return { sent: sendPush_(msg.to, msg) };
+}
+
+/** The user id behind a Firebase sign-in token, or null if it isn't valid. */
+function firebaseCaller_(idToken) {
+  if (!idToken) return null;
+  const res = UrlFetchApp.fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + FIREBASE_WEB_API_KEY, {
+    method: 'post', contentType: 'application/json', payload: JSON.stringify({ idToken: String(idToken) }), muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) return null;
+  const user = (JSON.parse(res.getContentText()).users || [])[0];
+  const email = String((user && user.email) || '');
+  const at = email.indexOf('@');
+  return at > 0 && email.slice(at + 1) === FIREBASE_EMAIL_DOMAIN ? email.slice(0, at) : null;
+}
+
+function fsGet_(coll, id) {
+  if (!id || /[\/]/.test(id)) return null;
+  const doc = firestore_('get', FS_DOCS + '/' + coll + '/' + encodeURIComponent(id), null, true);
+  return doc && doc.fields ? fromFields_(doc.fields) : null;
+}
+
+function recent_(iso) {
+  const t = Date.parse(iso);
+  return Boolean(t) && Date.now() - t < NOTIFY_WINDOW_MS;
+}
+
+/** What to tell whom, or null if the event isn't real, recent and yours. */
+function notification_(me, kind, id) {
+  const nameOf = function (uid) {
+    const u = fsGet_('users', uid);
+    return u ? niceName_(u.display_name) || u.username : 'A friend';
+  };
+  if (kind === 'game') {
+    const g = fsGet_('games', id);
+    if (!g || g.deleted || g.created_by !== me || !recent_(g.created_at)) return null;
+    const first = g.player1_id === me; // the logger is player 1
+    const theirs = first ? g.player1_score : g.player2_score;
+    const yours = first ? g.player2_score : g.player1_score;
+    const theirPens = first ? g.player1_pens : g.player2_pens;
+    const yourPens = first ? g.player2_pens : g.player1_pens;
+    let line = (yours > theirs ? 'You won ' : yours < theirs ? 'You lost ' : 'Draw ') + yours + '–' + theirs;
+    if (yours === theirs && typeof yourPens === 'number' && typeof theirPens === 'number') {
+      line = (yourPens > theirPens ? 'You won ' : 'You lost ') + yours + '–' + theirs + ' on penalties (' + yourPens + '–' + theirPens + ')';
+    } else if (g.overtime) line += g.sport === 'fifa' ? ' (ET)' : ' (OT)';
+    return { to: first ? g.player2_id : g.player1_id, title: nameOf(me) + ' logged a game', body: line + ' · ' + (MODE_NAMES_[g.sport] || 'NBA 2K'), url: './#dashboard', tag: 'game-' + id };
+  }
+  if (kind === 'request') {
+    const r = fsGet_('requests', id);
+    if (!r || r.from_id !== me || r.status !== 'pending' || !recent_(r.created_at)) return null;
+    return { to: r.to_id, title: nameOf(me) + (r.kind === 'delete' ? ' wants to delete a game' : ' wants to edit a game'), body: 'Tap to approve or decline.', url: './#notifications', tag: 'request-' + id };
+  }
+  if (kind === 'response') {
+    const r = fsGet_('requests', id);
+    if (!r || r.to_id !== me || (r.status !== 'approved' && r.status !== 'declined') || !recent_(r.resolved_at)) return null;
+    const approved = r.status === 'approved';
+    const body = !approved ? 'The game stays as it was.' : r.kind === 'delete' ? 'The game was deleted.' : 'The game was updated.';
+    return { to: r.from_id, title: nameOf(me) + (approved ? ' approved' : ' declined') + ' your request', body: body, url: './#notifications', tag: 'response-' + id };
+  }
+  if (kind === 'friend') {
+    const f = fsGet_('friendships', id);
+    if (!f || (f.user_a !== me && f.user_b !== me) || !recent_(f.created_at)) return null;
+    return { to: f.user_a === me ? f.user_b : f.user_a, title: nameOf(me) + ' added you on Dubs', body: 'Log your first game against them.', url: './#friends', tag: 'friend-' + id };
+  }
+  return null;
+}
+
+/** Sends to every phone of `userId` that has notifications on; forgets phones that turned them off. */
+function sendPush_(userId, msg) {
+  const rows = firestore_('post', FS_DOCS + ':runQuery', {
+    structuredQuery: { from: [{ collectionId: 'pushTokens' }], where: { fieldFilter: { field: { fieldPath: 'userId' }, op: 'EQUAL', value: { stringValue: userId } } } },
+  });
+  let sent = 0;
+  (rows || []).forEach(function (row) {
+    if (!row.document) return;
+    const token = fromFields_(row.document.fields).token;
+    if (!token) return;
+    const res = google_('post', 'https://fcm.googleapis.com/v1/projects/' + FIREBASE_PROJECT + '/messages:send', {
+      message: { token: token, data: { title: msg.title, body: msg.body, url: msg.url, tag: msg.tag }, webpush: { headers: { Urgency: 'high', TTL: '86400' } } },
+    }, true);
+    if (res && res.name) sent++;
+    else if (res && res.error && (res.error.status === 'NOT_FOUND' || /UNREGISTERED/.test(JSON.stringify(res.error)))) {
+      firestore_('delete', 'https://firestore.googleapis.com/v1/' + row.document.name, null, true);
+    }
+  });
+  return sent;
+}
+
 function google_(method, url, body, allowError) {
   const res = UrlFetchApp.fetch(url, {
     method: method,
@@ -504,6 +612,7 @@ function doPost(e) {
       case 'signUp': return signUp_(body.username, body.displayName, body.pin);
       case 'signIn': return signIn_(body.username, body.pin);
       case 'claimFirebase': return claimFirebase_(body.username, body.pin);
+      case 'notify': return notify_(body.idToken, body.kind, body.id);
       case 'signOut': return signOut_(body.token);
       case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName, body.avatar);
       case 'changePin': return changePin_(requireSession_(body.token), body.currentPin, body.newPin);
@@ -528,10 +637,10 @@ function doPost(e) {
  * Once the app runs on Firebase (Script Property FIREBASE_LIVE = yes), this Sheet is a frozen backup:
  * an old copy of the app still open on a phone gets told to reopen, and nothing new lands here
  * (its unsent games stay on the phone and go to Firebase after the update). Only the one-time
- * PIN check for moving an account (claimFirebase) keeps working.
+ * PIN check for moving an account (claimFirebase) and push notifications (notify) keep working.
  */
 function refuseIfMoved_(action) {
-  if (action === 'claimFirebase') return;
+  if (action === 'claimFirebase' || action === 'notify') return;
   if (PropertiesService.getScriptProperties().getProperty('FIREBASE_LIVE') === 'yes') {
     throw apiError_('Dubs just got faster! Close the app completely and open it again to update.', 'moved');
   }

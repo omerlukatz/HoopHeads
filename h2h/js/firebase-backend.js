@@ -6,7 +6,7 @@
 // Firebase Auth account "<userId>@users.hoophead.xyz" whose password is derived from the PIN.
 // Players who existed in the Google Sheet were copied over with the same ids; the first time they
 // sign in here, the old Apps Script checks their PIN once and sets their Firebase password ("claim").
-import { FIREBASE_CONFIG } from '../firebase-config.js';
+import { FIREBASE_CONFIG, VAPID_KEY } from '../firebase-config.js';
 import { CONFIG } from '../config.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
@@ -36,7 +36,7 @@ export function createFirebaseBackend(ApiError) {
       await new Promise((resolve) => {
         const off = auth.onAuthStateChanged(a, () => (off(), resolve()));
       });
-      return { ...auth, ...fs, auth: a, db };
+      return { ...auth, ...fs, app: firebaseApp, auth: a, db };
     })().catch((err) => {
       sdk = null; // let the next call try again (e.g. after coming back online)
       throw err;
@@ -290,6 +290,7 @@ export function createFirebaseBackend(ApiError) {
         await claim(name, pin); // moved from the Google Sheet and not signed in here yet
         await f.signInWithEmailAndPassword(f.auth, emailOf(userId), passwordOf(pin, userId));
       }
+      await releasePushFromOtherAccount(f, userId);
       const data = await snapshot(f, userId);
       return { token: userId, user: data.me, friends: data.friends, games: data.games, requests: data.requests };
     });
@@ -323,7 +324,12 @@ export function createFirebaseBackend(ApiError) {
     });
   }
 
-  const signOut = () => run((f) => (stopLive(), f.signOut(f.auth))).catch(() => ({}));
+  const signOut = () =>
+    run(async (f) => {
+      stopLive();
+      await forgetPush(f); // this phone stops getting your notifications
+      await f.signOut(f.auth);
+    }).catch(() => ({}));
 
   async function reauth(f, pin) {
     const id = meOf(f);
@@ -392,6 +398,7 @@ export function createFirebaseBackend(ApiError) {
     return run(async (f) => {
       const id = await reauth(f, pin);
       stopLive(); // its listeners would fail once the profile is gone
+      await forgetPush(f);
       const profile = await f.getDoc(ref(f, 'users', id));
       const [friendsA, friendsB, blocksMine, blocksTheirs, reqFrom, reqTo, games] = await Promise.all([
         where(f, 'friendships', 'user_a', '==', id),
@@ -478,6 +485,7 @@ export function createFirebaseBackend(ApiError) {
       if (!(await f.getDoc(ref(f, 'friendships', fid))).exists()) {
         const [a, b] = fid.split('__');
         await f.setDoc(ref(f, 'friendships', fid), { user_a: a, user_b: b, created_at: now() });
+        notify(f, 'friend', fid);
       }
       return other;
     });
@@ -551,6 +559,7 @@ export function createFirebaseBackend(ApiError) {
       const stamp = now();
       const doc = { ...cleanGame(game, me), created_by: me, created_at: game.created_at || stamp, updated_at: stamp, deleted: false, last_request: '' };
       await f.setDoc(ref(f, 'games', doc.id), doc);
+      notify(f, 'game', doc.id);
       return gameOut(doc);
     });
   }
@@ -605,6 +614,7 @@ export function createFirebaseBackend(ApiError) {
         resolved_at: '',
       };
       await f.setDoc(ref(f, 'requests', rid), request);
+      notify(f, 'request', rid);
       return { id: rid, ...request };
     });
   }
@@ -640,6 +650,7 @@ export function createFirebaseBackend(ApiError) {
         }
       }
       await batch.commit();
+      notify(f, 'response', requestId);
       return {};
     });
   }
@@ -655,6 +666,114 @@ export function createFirebaseBackend(ApiError) {
     });
   }
 
+  // ---------- push notifications ----------
+  // A phone that turns notifications on gets a push token from Firebase Cloud Messaging, saved in
+  // pushTokens/{token}. After you log a game, ask to change one, answer a request or add a friend,
+  // the app asks the Apps Script to notify the other player; it checks who's asking and that the
+  // event is real, then sends the notification to their phones. (No paid Firebase plan needed.)
+  // Tokens contain ":", which Firestore's REST paths can't take, so the doc id is the token's SHA-256.
+
+  const PUSH_KEY = 'h2h.push.v1'; // { userId, doc }: this phone's notifications, and for whom
+  const tokenDoc = async (token) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const savedPush = () => {
+    try {
+      return JSON.parse(localStorage.getItem(PUSH_KEY)) || null;
+    } catch {
+      return null;
+    }
+  };
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const canPush = () => typeof Notification !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
+
+  /** 'on' | 'off' | 'denied' | 'install' (iPhone: only apps added to the Home Screen can) | 'unsupported' */
+  function pushStatus(userId) {
+    if (!canPush()) return isIOS() && !isStandalone() ? 'install' : 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    return Notification.permission === 'granted' && savedPush()?.userId === userId ? 'on' : 'off';
+  }
+
+  let messaging = null;
+  async function pushToken(f) {
+    const m = await import(`${SDK}/firebase-messaging.js`);
+    if (!(await m.isSupported())) throw new ApiError('This device can’t get notifications.', 'invalid');
+    messaging ||= m.getMessaging(f.app);
+    // Our own service worker shows the notifications (see sw.js)
+    return m.getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: await navigator.serviceWorker.ready });
+  }
+
+  async function saveToken(f, me, token) {
+    const doc = await tokenDoc(token);
+    const old = savedPush();
+    if (old?.doc && old.doc !== doc && old.userId === me) await f.deleteDoc(ref(f, 'pushTokens', old.doc)).catch(() => {});
+    const platform = isIOS() ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'web';
+    await f.setDoc(ref(f, 'pushTokens', doc), { userId: me, token, created_at: now(), platform });
+    localStorage.setItem(PUSH_KEY, JSON.stringify({ userId: me, doc }));
+  }
+
+  async function forgetPush(f) {
+    const saved = savedPush();
+    localStorage.removeItem(PUSH_KEY);
+    if (saved?.doc) await f.deleteDoc(ref(f, 'pushTokens', saved.doc)).catch(() => {});
+  }
+
+  /** Signing in on a phone that got someone else's notifications: take the token over, then drop it. */
+  async function releasePushFromOtherAccount(f, me) {
+    const saved = savedPush();
+    if (!saved?.doc || saved.userId === me) return;
+    localStorage.removeItem(PUSH_KEY);
+    try {
+      // Rules only let you delete your own, so make it yours first (with a placeholder token)
+      await f.setDoc(ref(f, 'pushTokens', saved.doc), { userId: me, token: '-', created_at: now(), platform: 'web' });
+      await f.deleteDoc(ref(f, 'pushTokens', saved.doc));
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /** Turns notifications on for this phone. Call it straight from a tap (iPhones require one). */
+  async function enablePush() {
+    // Ask first, before anything else is awaited, so the tap still counts as the reason to ask
+    const permission = canPush() ? await Notification.requestPermission() : 'denied';
+    if (permission !== 'granted') {
+      throw new ApiError(permission === 'denied' ? 'Notifications are blocked for Dubs. You can allow them in your phone’s Settings.' : 'Notifications weren’t turned on.', 'invalid');
+    }
+    return run(async (f) => {
+      await saveToken(f, meOf(f), await pushToken(f));
+      return {};
+    });
+  }
+
+  const disablePush = () => run(async (f) => (await forgetPush(f), {}));
+
+  /** On each app open: push tokens can change, so keep this phone's current. */
+  async function refreshPush() {
+    const saved = savedPush();
+    if (!saved || !canPush() || Notification.permission !== 'granted') return;
+    await run(async (f) => {
+      const me = meOf(f);
+      if (saved.userId === me) await saveToken(f, me, await pushToken(f));
+    }).catch(() => {});
+  }
+
+  /** Asks the Apps Script to notify the other player about something you just did. Best effort. */
+  function notify(f, kind, id) {
+    if (!CONFIG.APPS_SCRIPT_URL) return;
+    f.auth.currentUser
+      ?.getIdToken()
+      .then((idToken) =>
+        // no-cors: the script runs on arrival; we don't need its answer (often lost in its redirect)
+        fetch(CONFIG.APPS_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          keepalive: true,
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'notify', idToken, kind, id }),
+        }),
+      )
+      .catch(() => {});
+  }
+
   /** Calls `fn` whenever your data changes on the server; returns an unsubscribe function. */
   function onRemoteChange(fn) {
     changeListeners.add(fn);
@@ -662,7 +781,7 @@ export function createFirebaseBackend(ApiError) {
   }
 
   return {
-    onRemoteChange, signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
+    onRemoteChange, pushStatus, enablePush, disablePush, refreshPush, signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
     addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames,
     addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount,
   };

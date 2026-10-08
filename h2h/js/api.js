@@ -140,5 +140,11 @@ const backend = isFirebase ? createFirebaseBackend(ApiError) : isDemo ? demo.cre
 /** Firebase pushes changes as they happen; the Sheet backend has no way to, so this does nothing there. */
 export const onRemoteChange = backend.onRemoteChange || (() => () => {});
 
+// Push notifications (Firebase only): pushStatus(userId) -> 'on' | 'off' | 'denied' | 'install' | 'unsupported'
+export const pushStatus = backend.pushStatus || (() => 'unsupported');
+export const enablePush = backend.enablePush || (async () => { throw new ApiError('Notifications aren’t available here.', 'invalid'); });
+export const disablePush = backend.disablePush || (async () => ({}));
+export const refreshPush = backend.refreshPush || (async () => {});
+
 export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount } = backend;
 export const demoControls = isDemo ? demo.controls : null;
