@@ -685,7 +685,7 @@ function openAnnouncement() {
       const result = await store.admin.announce(id, head.value.trim(), text.value.trim());
       haptic('success');
       sheet.close();
-      toast(`Sent. ${plural(result.sent || 0, 'notification')} delivered.`);
+      toast(result.duplicate ? 'Sent.' : `Sent. ${plural(result.sent || 0, 'notification')} delivered.`);
     } catch (err) {
       haptic('warning');
       send.disabled = false;

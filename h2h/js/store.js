@@ -574,7 +574,7 @@ async function syncOnce() {
 let timer = null;
 /** Refresh on open, on focus, when the connection returns, and every POLL_SECONDS while visible. */
 export function startAutoSync() {
-  api.refreshPush(); // keeps this phone's notification token current
+  api.refreshPush().then(() => emit({ push: true })); // keeps this phone's notification token current (and Settings shows it)
   clearInterval(timer);
   timer = setInterval(() => document.visibilityState === 'visible' && sync(), CONFIG.POLL_SECONDS * 1000);
   syncIfStale();
@@ -585,6 +585,13 @@ function syncIfStale() {
   if (!state.lastSynced || Date.now() - Date.parse(state.lastSynced) > 10000 || outbox.length) sync();
 }
 window.addEventListener('online', () => sync());
+// Coming back to the app (iPhones rarely restart it): keep this phone's notifications registered
+let pushCheckedAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.session || Date.now() - pushCheckedAt < 6 * 3600 * 1000) return;
+  pushCheckedAt = Date.now();
+  api.refreshPush();
+});
 // A friend logged a game or answered a request: show it now rather than at the next poll
 let pushed = null;
 api.onRemoteChange(() => {

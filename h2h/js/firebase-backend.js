@@ -416,6 +416,7 @@ export function createFirebaseBackend(ApiError) {
     return run(async (f) => {
       const id = await reauth(f, pin);
       stopLive(); // its listeners would fail once the profile is gone
+      setWanted(id, false);
       await forgetPush(f);
       const profile = await f.getDoc(ref(f, 'users', id));
       const [friendsA, friendsB, blocksMine, blocksTheirs, reqFrom, reqTo, games] = await Promise.all([
@@ -844,8 +845,11 @@ export function createFirebaseBackend(ApiError) {
   };
   /** Sends an announcement to everyone. `id` makes a retried send harmless. */
   const adminAnnounce = async (id, title, body) => {
+    // `duplicate`: an earlier try already sent it (Apps Script often loses its reply), so it still
+    // needs its history entry, once
     const result = await adminScript('adminAnnounce', { id, title, body });
-    if (!result.duplicate) await adminNote('announce', `Sent announcement “${title}”`, { announcement_id: id });
+    const logged = await run(async (f) => !(await f.getDocs(f.query(f.collection(f.db, 'adminLog'), f.where('announcement_id', '==', id)))).empty);
+    if (!logged) await adminNote('announce', `Sent announcement “${title}”`, { announcement_id: id });
     return result;
   };
   const adminAnnouncements = () =>
@@ -872,6 +876,22 @@ export function createFirebaseBackend(ApiError) {
   // Tokens contain ":", which Firestore's REST paths can't take, so the doc id is the token's SHA-256.
 
   const PUSH_KEY = 'h2h.push.v1'; // { userId, doc }: this phone's notifications, and for whom
+  // Accounts that turned notifications on on this phone. Signing out stops them (the phone may be
+  // passed to someone else); signing back in turns them on again, without asking.
+  const WANTED_KEY = 'h2h.pushWanted.v1';
+  const wanted = () => {
+    try {
+      return JSON.parse(localStorage.getItem(WANTED_KEY)) || {};
+    } catch {
+      return {};
+    }
+  };
+  const setWanted = (userId, on) => {
+    const w = wanted();
+    if (on) w[userId] = true;
+    else delete w[userId];
+    localStorage.setItem(WANTED_KEY, JSON.stringify(w));
+  };
   const tokenDoc = async (token) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, '0')).join('');
   const savedPush = () => {
     try {
@@ -937,20 +957,32 @@ export function createFirebaseBackend(ApiError) {
       throw new ApiError(permission === 'denied' ? 'Notifications are blocked for Dubs. You can allow them in your phone’s Settings.' : 'Notifications weren’t turned on.', 'invalid');
     }
     return run(async (f) => {
-      await saveToken(f, meOf(f), await pushToken(f));
+      const me = meOf(f);
+      await saveToken(f, me, await pushToken(f));
+      setWanted(me, true);
       return {};
     });
   }
 
-  const disablePush = () => run(async (f) => (await forgetPush(f), {}));
+  const disablePush = () =>
+    run(async (f) => {
+      setWanted(meOf(f), false);
+      await forgetPush(f);
+      return {};
+    });
 
-  /** On each app open: push tokens can change, so keep this phone's current. */
+  /**
+   * On opening the app, coming back to it, and signing in: re-registers this phone if you want
+   * notifications here. Tokens can change, and a phone the server stopped reaching gets dropped
+   * from pushTokens; this puts it back.
+   */
   async function refreshPush() {
-    const saved = savedPush();
-    if (!saved || !canPush() || Notification.permission !== 'granted') return;
+    if (!canPush() || Notification.permission !== 'granted') return;
     await run(async (f) => {
       const me = meOf(f);
-      if (saved.userId === me) await saveToken(f, me, await pushToken(f));
+      if (savedPush()?.userId !== me && !wanted()[me]) return;
+      setWanted(me, true); // phones that turned it on before this was remembered
+      await saveToken(f, me, await pushToken(f));
     }).catch(() => {});
   }
 
