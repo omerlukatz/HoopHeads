@@ -6,13 +6,15 @@
 // Firebase Auth account "<userId>@users.hoophead.xyz" whose password is derived from the PIN.
 // Players who existed in the Google Sheet were copied over with the same ids; the first time they
 // sign in here, the old Apps Script checks their PIN once and sets their Firebase password ("claim").
-import { FIREBASE_CONFIG, VAPID_KEY } from '../firebase-config.js';
+import { FIREBASE_CONFIG, VAPID_KEY, ADMIN_ID, ADMIN_USERNAME } from '../firebase-config.js';
 import { CONFIG } from '../config.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
 const EMAIL_DOMAIN = 'users.hoophead.xyz';
 const AVATAR_COLORS = ['#5856D6', '#C93400', '#007A5E', '#A2338A', '#0060C7', '#8A5A00', '#B0263A', '#3D6591'];
 const REQUEST_DAYS = 14;
+const ANNOUNCEMENT_DAYS = 30; // how long an announcement stays on the Notifications page
+const announcementsSince = () => new Date(Date.now() - ANNOUNCEMENT_DAYS * 86400000).toISOString();
 
 const emailOf = (userId) => `${userId}@${EMAIL_DOMAIN}`;
 const passwordOf = (pin, userId) => `dubs:${pin}:${userId}`; // Firebase needs 6+ characters
@@ -70,7 +72,8 @@ export function createFirebaseBackend(ApiError) {
     if (code === 'auth/network-request-failed' || code === 'unavailable' || code === 'deadline-exceeded') {
       return navigator.onLine ? new ApiError('Couldn’t reach the server. Try again in a moment.', 'timeout') : new ApiError('You’re offline.', 'network');
     }
-    if (code === 'unauthenticated' || code === 'auth/user-token-expired' || code === 'auth/user-disabled') {
+    if (code === 'auth/user-disabled') return new ApiError('This account is suspended.', 'auth');
+    if (code === 'unauthenticated' || code === 'auth/user-token-expired') {
       return new ApiError('Your session has ended. Sign in again.', 'auth');
     }
     if (code === 'permission-denied') return new ApiError('That isn’t allowed.', 'invalid');
@@ -143,7 +146,7 @@ export function createFirebaseBackend(ApiError) {
   }
 
   function startLive(f, me) {
-    const parts = { me: undefined, fa: undefined, fb: undefined, games: undefined, rf: undefined, rt: undefined };
+    const parts = { me: undefined, fa: undefined, fb: undefined, games: undefined, rf: undefined, rt: undefined, ann: undefined };
     const friendDocs = new Map();
     let friendKey = null;
     let friendUnsubs = [];
@@ -184,11 +187,11 @@ export function createFirebaseBackend(ApiError) {
       }, fail));
     }
 
-    const listen = (key, q) => f.onSnapshot(q, (snap) => {
+    const listen = (key, q, onError = fail) => f.onSnapshot(q, (snap) => {
       parts[key] = key === 'me' ? (snap.exists() ? pub(me, snap.data()) : null) : docs(snap);
       if (key === 'fa' || key === 'fb') watchFriends();
       changed();
-    }, fail);
+    }, onError);
     const qWhere = (coll, field, op, value) => f.query(f.collection(f.db, coll), f.where(field, op, value));
     const unsubs = [
       listen('me', ref(f, 'users', me)),
@@ -197,6 +200,11 @@ export function createFirebaseBackend(ApiError) {
       listen('games', qWhere('games', 'players', 'array-contains', me)),
       listen('rf', qWhere('requests', 'from_id', '==', me)),
       listen('rt', qWhere('requests', 'to_id', '==', me)),
+      // Announcements are extra: if they can't load, the rest of the app still works
+      listen('ann', f.query(f.collection(f.db, 'announcements'), f.orderBy('created_at', 'desc'), f.limit(10)), () => {
+        parts.ann = [];
+        changed();
+      }),
     ];
     watchFriends();
 
@@ -217,6 +225,7 @@ export function createFirebaseBackend(ApiError) {
         friends: [...ids.map((id) => friendDocs.get(id)).filter(Boolean), ...extra],
         games: parts.games.filter((g) => !g.deleted).map(gameOut),
         requests: [...parts.rf, ...parts.rt].filter((r) => r.status === 'pending' || ((r.status === 'approved' || r.status === 'declined') && String(r.resolved_at) >= since)),
+        announcements: parts.ann.filter((a) => String(a.created_at) >= announcementsSince()),
       };
     };
     return session;
@@ -277,7 +286,7 @@ export function createFirebaseBackend(ApiError) {
   async function signIn(username, pin) {
     const name = String(username || '').trim().toLowerCase().replace(/^@/, '');
     return run(async (f) => {
-      if (!/^\d{4}$/.test(String(pin))) throw new ApiError('Wrong username or PIN.', 'auth');
+      if (!/^\d{4}(\d{4})?$/.test(String(pin))) throw new ApiError('Wrong username or PIN.', 'auth'); // 8 digits: the admin
       const entry = await f.getDoc(ref(f, 'usernames', name));
       if (!entry.exists()) throw new ApiError('Wrong username or PIN.', 'auth');
       const { userId, claimed } = entry.data();
@@ -292,7 +301,7 @@ export function createFirebaseBackend(ApiError) {
       }
       await releasePushFromOtherAccount(f, userId);
       const data = await snapshot(f, userId);
-      return { token: userId, user: data.me, friends: data.friends, games: data.games, requests: data.requests };
+      return { token: userId, user: data.me, friends: data.friends, games: data.games, requests: data.requests, announcements: data.announcements };
     });
   }
 
@@ -377,14 +386,23 @@ export function createFirebaseBackend(ApiError) {
   }
 
   async function changePin(token, currentPin, newPin) {
-    if (!/^\d{4}$/.test(String(newPin))) throw new ApiError('Your new PIN must be 4 digits.', 'invalid');
     return run(async (f) => {
+      const digits = meOf(f) === ADMIN_ID ? 8 : 4;
+      if (!new RegExp(`^\\d{${digits}}$`).test(String(newPin))) throw new ApiError(`Your new PIN must be ${digits} digits.`, 'invalid');
       const id = await reauth(f, currentPin).catch((e) => {
         throw e.code === 'wrong_pin' ? new ApiError('Your current PIN is wrong.', 'wrong_pin') : e;
       });
       await f.updatePassword(f.auth.currentUser, passwordOf(newPin, id)); // signs out your other devices
+      // The sign-in screen reads this to show the admin an 8-digit PIN pad
+      if (id === ADMIN_ID) await f.setDoc(ref(f, 'config', 'adminPin'), { length: 8, updated_at: now() });
       return { token: id };
     });
+  }
+
+  /** How many digits this username's PIN has: 8 for the admin (once set up), otherwise 4. */
+  async function pinLength(username) {
+    if (String(username || '').trim().toLowerCase().replace(/^@/, '') !== ADMIN_USERNAME) return 4;
+    return run(async (f) => ((await f.getDoc(ref(f, 'config', 'adminPin'))).exists() ? 8 : 4)).catch(() => 4);
   }
 
   const verifyPin = (token, pin) => run(async (f) => (await reauth(f, pin), {}));
@@ -448,7 +466,7 @@ export function createFirebaseBackend(ApiError) {
       }
       const [friends, hidden] = await Promise.all([friendIdsOf(f, me), blockedEitherWay(f, me)]);
       return everyone.users
-        .filter((u) => u.id !== me && !hidden.includes(u.id))
+        .filter((u) => u.id !== me && u.id !== ADMIN_ID && !hidden.includes(u.id))
         .filter((u) => u.username.toLowerCase().includes(q) || u.display_name.toLowerCase().includes(q))
         .slice(0, 20)
         .map((u) => ({ ...u, isFriend: friends.includes(u.id) }));
@@ -477,7 +495,7 @@ export function createFirebaseBackend(ApiError) {
   async function addFriend(token, userId) {
     return run(async (f) => {
       const me = meOf(f);
-      if (!userId || userId === me) throw new ApiError('Pick someone else to add.', 'invalid');
+      if (!userId || userId === me || userId === ADMIN_ID || me === ADMIN_ID) throw new ApiError('Pick someone else to add.', 'invalid');
       const other = await userDoc(f, userId);
       if (!other) throw new ApiError('That user no longer exists.', 'invalid');
       if ((await blockedEitherWay(f, me)).includes(userId)) throw new ApiError('You can’t add this person.', 'invalid');
@@ -666,6 +684,186 @@ export function createFirebaseBackend(ApiError) {
     });
   }
 
+  // ---------- admin console ----------
+  // Only the admin account (ADMIN_ID) can use these; the security rules enforce it. Changes are
+  // anonymous: no notifications, no labels, and games keep who logged them. Each change is written
+  // to the admin's private history (adminLog).
+
+  function requireAdmin(f) {
+    const me = meOf(f);
+    if (me !== ADMIN_ID) throw new ApiError('Only the admin can do that.', 'invalid');
+    return me;
+  }
+  const all = async (f, coll) => (await f.getDocs(f.collection(f.db, coll))).docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  /** Everything the console shows: players (with status), friendships, games, notification phones. */
+  async function adminLoad() {
+    return run(async (f) => {
+      requireAdmin(f);
+      const [users, friendships, games, suspensions, tokens, blocks] = await Promise.all([
+        all(f, 'users'), all(f, 'friendships'), all(f, 'games'), all(f, 'suspensions'), all(f, 'pushTokens'), all(f, 'blocks'),
+      ]);
+      const players = users.filter((u) => u.id !== ADMIN_ID);
+      // "Moved": has signed in to the Firebase version (or signed up there)
+      const moved = await Promise.all(players.map((u) => f.getDoc(ref(f, 'usernames', u.username)).then((d) => d.exists() && d.data().claimed === true)));
+      const suspended = new Set(suspensions.map((x) => x.id));
+      const phones = new Map();
+      tokens.forEach((t) => phones.set(t.userId, (phones.get(t.userId) || 0) + 1));
+      return {
+        users: players.map((u, i) => ({ ...pub(u.id, u), created_at: u.created_at || '', moved: moved[i], suspended: suspended.has(u.id), phones: phones.get(u.id) || 0 })),
+        friendships: friendships.map((x) => ({ id: x.id, a: x.user_a, b: x.user_b, created_at: x.created_at })),
+        blocks: blocks.map((x) => ({ blocker: x.blocker, blocked: x.blocked })),
+        games: games.filter((g) => !g.deleted).map(gameOut),
+        phones: tokens.length,
+      };
+    });
+  }
+
+  /** Cancels open requests about a game the admin just changed (in the same batch). */
+  async function cancelOpenRequests(f, batch, gameId, stamp) {
+    const open = await f.getDocs(f.query(f.collection(f.db, 'requests'), f.where('game_id', '==', gameId)));
+    open.docs.filter((d) => d.data().status === 'pending').forEach((d) => batch.update(d.ref, { status: 'cancelled', resolved_at: stamp }));
+  }
+
+  function logEntry(f, batch, action, summary, extra = {}) {
+    batch.set(f.doc(f.collection(f.db, 'adminLog')), { at: now(), action, summary, ...extra });
+  }
+
+  /** Logs a new game for two friends, or saves changes to an existing one. `summary` goes to the history. */
+  async function adminSaveGame(game, summary) {
+    return run(async (f) => {
+      requireAdmin(f);
+      const stamp = now();
+      const id = String(game.id);
+      const snap = await f.getDoc(ref(f, 'games', id));
+      const clean = cleanGame(game, game.player1_id); // same checks as a player's game
+      const batch = f.writeBatch(f.db);
+      if (snap.exists()) {
+        const prev = snap.data();
+        // The console edits a game in its saved order (player 1 stays player 1)
+        if (clean.player1_id !== prev.player1_id || clean.player2_id !== prev.player2_id) {
+          throw new ApiError('A game can’t be moved to different players.', 'invalid');
+        }
+        batch.set(ref(f, 'games', id), { ...prev, ...clean, id, updated_at: stamp, deleted: false });
+        await cancelOpenRequests(f, batch, id, stamp);
+        logEntry(f, batch, 'edit-game', summary, { game_id: id, before: gameOut(prev), after: clean });
+      } else {
+        if (!(await f.getDoc(ref(f, 'friendships', pairId(clean.player1_id, clean.player2_id)))).exists()) {
+          throw new ApiError('They need to be friends first.', 'invalid');
+        }
+        // Credited to player 1, as if they had logged it
+        batch.set(ref(f, 'games', id), { ...clean, created_by: clean.player1_id, created_at: stamp, updated_at: stamp, deleted: false, last_request: '' });
+        logEntry(f, batch, 'log-game', summary, { game_id: id, after: clean });
+      }
+      await batch.commit();
+      return {};
+    });
+  }
+  async function adminDeleteGame(id, summary) {
+    return run(async (f) => {
+      requireAdmin(f);
+      const snap = await f.getDoc(ref(f, 'games', String(id)));
+      if (!snap.exists() || snap.data().deleted) return {};
+      const stamp = now();
+      const batch = f.writeBatch(f.db);
+      batch.update(ref(f, 'games', String(id)), { deleted: true, updated_at: stamp });
+      await cancelOpenRequests(f, batch, String(id), stamp);
+      logEntry(f, batch, 'delete-game', summary, { game_id: String(id), before: gameOut(snap.data()) });
+      await batch.commit();
+      return {};
+    });
+  }
+
+  async function adminSetFriends(a, b, friends, summary) {
+    return run(async (f) => {
+      requireAdmin(f);
+      if (!a || !b || a === b || a === ADMIN_ID || b === ADMIN_ID) throw new ApiError('Pick two different players.', 'invalid');
+      const fid = pairId(a, b);
+      const exists = (await f.getDoc(ref(f, 'friendships', fid))).exists();
+      if (exists === friends) return {};
+      const batch = f.writeBatch(f.db);
+      if (friends) {
+        const [x, y] = fid.split('__');
+        batch.set(ref(f, 'friendships', fid), { user_a: x, user_b: y, created_at: now() });
+      } else batch.delete(ref(f, 'friendships', fid));
+      logEntry(f, batch, friends ? 'add-friends' : 'remove-friends', summary, { users: [a, b] });
+      await batch.commit();
+      return {};
+    });
+  }
+
+  /** The admin's private history, newest first. */
+  async function adminHistory() {
+    return run(async (f) => {
+      requireAdmin(f);
+      const snap = await f.getDocs(f.query(f.collection(f.db, 'adminLog'), f.orderBy('at', 'desc'), f.limit(200)));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    });
+  }
+  const adminNote = (action, summary, extra = {}) =>
+    run(async (f) => {
+      requireAdmin(f);
+      await f.addDoc(f.collection(f.db, 'adminLog'), { at: now(), action, summary, ...extra });
+      return {};
+    });
+
+  /** Calls one of the Apps Script's admin actions (it checks this is really the admin). */
+  async function adminScript(action, params) {
+    return run(async (f) => {
+      requireAdmin(f);
+      const idToken = await f.auth.currentUser.getIdToken();
+      for (let attempt = 0; ; attempt++) {
+        let json = null;
+        try {
+          const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action, idToken, ...params }),
+            redirect: 'follow',
+          });
+          json = await res.json();
+        } catch {
+          /* Apps Script's broken redirect: try again (these actions are safe to repeat) */
+        }
+        if (json) {
+          if (!json.ok) throw new ApiError(json.error || 'Something went wrong.', json.code === 'auth' ? 'invalid' : json.code || 'server');
+          return json.data;
+        }
+        if (attempt >= 4) throw new ApiError('Google didn’t answer. Try again in a moment.', 'timeout');
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+      }
+    });
+  }
+  const adminResetPin = async (userId, pin, summary) => {
+    await adminScript('adminResetPin', { userId, pin });
+    await adminNote('reset-pin', summary, { users: [userId] });
+  };
+  const adminSuspend = async (userId, suspended, summary) => {
+    await adminScript('adminSuspend', { userId, suspended });
+    await adminNote(suspended ? 'suspend' : 'unsuspend', summary, { users: [userId] });
+  };
+  /** Sends an announcement to everyone. `id` makes a retried send harmless. */
+  const adminAnnounce = async (id, title, body) => {
+    const result = await adminScript('adminAnnounce', { id, title, body });
+    if (!result.duplicate) await adminNote('announce', `Sent announcement “${title}”`, { announcement_id: id });
+    return result;
+  };
+  const adminAnnouncements = () =>
+    run(async (f) => {
+      requireAdmin(f);
+      const snap = await f.getDocs(f.query(f.collection(f.db, 'announcements'), f.orderBy('created_at', 'desc'), f.limit(50)));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    });
+  const adminRemoveAnnouncement = (id, title) =>
+    run(async (f) => {
+      requireAdmin(f);
+      const batch = f.writeBatch(f.db);
+      batch.delete(ref(f, 'announcements', id));
+      logEntry(f, batch, 'remove-announcement', `Removed announcement “${title}”`, { announcement_id: id });
+      await batch.commit();
+      return {};
+    });
+
   // ---------- push notifications ----------
   // A phone that turns notifications on gets a push token from Firebase Cloud Messaging, saved in
   // pushTokens/{token}. After you log a game, ask to change one, answer a request or add a friend,
@@ -781,7 +979,9 @@ export function createFirebaseBackend(ApiError) {
   }
 
   return {
-    onRemoteChange, pushStatus, enablePush, disablePush, refreshPush, signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
+    onRemoteChange, pushStatus, enablePush, disablePush, refreshPush, pinLength,
+    adminLoad, adminSaveGame, adminDeleteGame, adminSetFriends, adminHistory, adminResetPin, adminSuspend, adminAnnounce, adminAnnouncements, adminRemoveAnnouncement,
+    signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
     addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames,
     addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount,
   };

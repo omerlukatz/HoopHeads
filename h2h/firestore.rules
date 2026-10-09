@@ -15,6 +15,12 @@ rules_version = '2';
 //   games/{gameId}         same fields as the Sheet + players [player1_id, player2_id] + last_request
 //   requests/{requestId}   { game_id, from_id, to_id, kind, game, status, created_at, resolved_at }
 //   pushTokens/{sha256}    { userId, token, created_at, platform }  phones that get push notifications
+//   announcements/{id}     { title, body, created_at }     from the admin, shown to everyone
+//   suspensions/{userId}   { at }                          suspended accounts (written by the Apps Script)
+//   adminLog/{id}          { at, action, summary, … }       the admin's private history
+//   config/adminPin        { length, updated_at }           public: the admin signs in with 8 digits
+//
+// The admin (one fixed account, see isAdmin) can change any game and friendship directly.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -36,6 +42,10 @@ service cloud.firestore {
     /** Used when deleting your account: your profile is gone at the end of the same batch. */
     function deletingMyAccount() { return signedIn() && !existsAfter(path('users', me())); }
     function onlyChanged(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    // The admin account (also ADMIN_ID in firebase-config.js and the Apps Script)
+    function adminId() { return 'u_9057597298d148ed'; }
+    function isAdmin() { return signedIn() && me() == adminId() && member(); }
 
     // ---------- usernames (sign-in lookup) ----------
 
@@ -81,23 +91,24 @@ service cloud.firestore {
 
     match /friendships/{fid} {
       // get by id works even when the doc doesn't exist yet ("are we friends?"), as long as it's yours
-      allow get: if member() && me() in fid.split('__');
-      allow list: if member() && (resource.data.user_a == me() || resource.data.user_b == me());
+      allow get: if member() && (me() in fid.split('__') || isAdmin());
+      allow list: if member() && (resource.data.user_a == me() || resource.data.user_b == me() || isAdmin());
       allow create: if member()
         && request.resource.data.keys().hasOnly(['user_a', 'user_b', 'created_at'])
-        && (request.resource.data.user_a == me() || request.resource.data.user_b == me())
+        && (request.resource.data.user_a == me() || request.resource.data.user_b == me() || isAdmin())
+        && request.resource.data.user_a != adminId() && request.resource.data.user_b != adminId()
         && request.resource.data.user_a < request.resource.data.user_b
         && fid == request.resource.data.user_a + '__' + request.resource.data.user_b
         && exists(path('users', request.resource.data.user_a))
         && exists(path('users', request.resource.data.user_b))
         && !blocked(request.resource.data.user_a, request.resource.data.user_b);
-      allow delete: if signedIn() && (resource.data.user_a == me() || resource.data.user_b == me());
+      allow delete: if signedIn() && (resource.data.user_a == me() || resource.data.user_b == me() || isAdmin());
       allow update: if false;
     }
 
     match /blocks/{bid} {
-      allow get: if member() && me() in bid.split('__');
-      allow list: if member() && (resource.data.blocker == me() || resource.data.blocked == me());
+      allow get: if member() && (me() in bid.split('__') || isAdmin());
+      allow list: if member() && (resource.data.blocker == me() || resource.data.blocked == me() || isAdmin());
       allow create: if member()
         && request.resource.data.keys().hasOnly(['blocker', 'blocked', 'created_at'])
         && request.resource.data.blocker == me()
@@ -114,16 +125,17 @@ service cloud.firestore {
       allow read: if member();
 
       // Log a game: you're one of the players, the other is your friend, it's well-formed.
+      // The admin logs games for two friends (credited to one of them, so it stays anonymous).
       allow create: if member() && validGame(request.resource.data, gid)
-        && me() in request.resource.data.players
-        && request.resource.data.created_by == me()
+        && ((me() in request.resource.data.players && request.resource.data.created_by == me())
+            || (isAdmin() && request.resource.data.created_by in request.resource.data.players))
         && request.resource.data.deleted == false
         && request.resource.data.last_request == ''
         && friends(request.resource.data.player1_id, request.resource.data.player2_id);
 
       // A saved game only changes when the other player approves a request, in the same batch
       // as the approval (see requests below) — or is hidden when one of its players deletes their account.
-      allow update: if signedIn() && (applyingApprovedRequest(gid) || hidingForDeletedAccount());
+      allow update: if signedIn() && (applyingApprovedRequest(gid) || hidingForDeletedAccount() || adminFixing(gid));
       allow delete: if false;
     }
 
@@ -166,6 +178,14 @@ service cloud.firestore {
                 && g.player1_pens == after.game.player1_pens && g.player2_pens == after.game.player2_pens);
     }
 
+    /** The admin edits or deletes a game directly; who played it and who logged it stay the same. */
+    function adminFixing(gid) {
+      let g = request.resource.data;
+      return isAdmin() && validGame(g, gid)
+        && g.players == resource.data.players
+        && g.created_by == resource.data.created_by && g.created_at == resource.data.created_at;
+    }
+
     function hidingForDeletedAccount() {
       return deletingMyAccount() && me() in resource.data.players
         && onlyChanged(['deleted', 'updated_at']) && request.resource.data.deleted == true;
@@ -176,7 +196,7 @@ service cloud.firestore {
     // One document per phone that turned notifications on (the id is the SHA-256 of its push
     // token). Only the Apps Script, which sends the notifications with admin access, reads them.
     match /pushTokens/{tokenId} {
-      allow read: if false;
+      allow read: if isAdmin(); // to count who has notifications on
       allow create, update: if member() && tokenId.matches('[0-9a-f]{64}')
         && request.resource.data.keys().hasOnly(['userId', 'token', 'created_at', 'platform'])
         && request.resource.data.userId == me()
@@ -185,10 +205,35 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.userId == me();
     }
 
+    // ---------- admin ----------
+
+    // Announcements: the Apps Script writes them (and sends the push); everyone reads them.
+    match /announcements/{aid} {
+      allow read: if member();
+      allow delete: if isAdmin();
+      allow create, update: if false;
+    }
+    // Suspended accounts (the Apps Script also disables their login)
+    match /suspensions/{uid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // The admin's private history of changes
+    match /adminLog/{lid} {
+      allow read, create, delete: if isAdmin();
+      allow update: if false;
+    }
+    // config/adminPin: public, so the sign-in screen knows the admin's PIN has 8 digits
+    match /config/{cid} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if isAdmin();
+    }
+
     // ---------- edit / delete requests ----------
 
     match /requests/{rid} {
-      allow read: if member() && (resource.data.from_id == me() || resource.data.to_id == me());
+      allow read: if member() && (resource.data.from_id == me() || resource.data.to_id == me() || isAdmin());
 
       // Ask to edit or delete a saved game you played in; it goes to the other player.
       allow create: if member() && validRequest(request.resource.data)
@@ -201,6 +246,10 @@ service cloud.firestore {
           && onlyChanged(['status', 'resolved_at']))
         // you cancel your own request
         || (resource.data.from_id == me() && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && onlyChanged(['status', 'resolved_at']))
+        // the admin changed the game, so an open request about it is cancelled
+        || (isAdmin() && resource.data.status == 'pending'
           && request.resource.data.status == 'cancelled'
           && onlyChanged(['status', 'resolved_at']))
         // you replace your own open request (e.g. a newer edit)

@@ -146,5 +146,14 @@ export const enablePush = backend.enablePush || (async () => { throw new ApiErro
 export const disablePush = backend.disablePush || (async () => ({}));
 export const refreshPush = backend.refreshPush || (async () => {});
 
+// PIN digits for a username (the admin has 8 on Firebase) and the admin console (Firebase only)
+export const pinLength = backend.pinLength || (async () => 4);
+const adminOnly = async () => {
+  throw new ApiError('The admin console needs the Firebase version.', 'invalid');
+};
+export const [adminLoad, adminSaveGame, adminDeleteGame, adminSetFriends, adminHistory, adminResetPin, adminSuspend, adminAnnounce, adminAnnouncements, adminRemoveAnnouncement] = [
+  'adminLoad', 'adminSaveGame', 'adminDeleteGame', 'adminSetFriends', 'adminHistory', 'adminResetPin', 'adminSuspend', 'adminAnnounce', 'adminAnnouncements', 'adminRemoveAnnouncement',
+].map((name) => backend[name] || adminOnly);
+
 export const { signUp, signIn, signOut, bootstrap, getMe, updateProfile, changePin, getFriends, searchUsers, addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames, addGame, updateGame, deleteGame, requestChange, respondRequest, cancelRequest, verifyPin, deleteAccount } = backend;
 export const demoControls = isDemo ? demo.controls : null;

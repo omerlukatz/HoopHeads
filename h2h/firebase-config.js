@@ -13,3 +13,8 @@ export const FIREBASE_CONFIG = {
 // Public "Web Push certificate" key (Firebase console → Project settings → Cloud Messaging).
 // Phones use it to sign up for push notifications; it's meant to be public.
 export const VAPID_KEY = 'BKQUJ-7cSdpEmF7yIL9sKeKHxm4i1-Ro_xigNtLLsHQ8KnXYxupJE0Nvs5nRSUqunpDAFS3JXIpzyi1mOXrT87U';
+
+// The admin account. It gets the admin console instead of the normal app, and the security rules
+// (firestore.rules, isAdmin) and the Apps Script (ADMIN_ID) trust only this id.
+export const ADMIN_USERNAME = 'admin';
+export const ADMIN_ID = 'u_9057597298d148ed';

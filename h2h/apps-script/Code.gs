@@ -519,6 +519,66 @@ function sendPush_(userId, msg) {
   return sent;
 }
 
+/* ---------- admin console ----------
+ * The admin account's console calls these with its Firebase sign-in token; nothing else may.
+ */
+const ADMIN_ID = 'u_9057597298d148ed'; // also in firestore.rules (adminId) and firebase-config.js
+
+function requireAdmin_(idToken) {
+  if (firebaseCaller_(idToken) !== ADMIN_ID) throw apiError_('Only the admin can do that.', 'auth');
+  return ADMIN_ID;
+}
+
+/** The Firebase login uid of a player (creating the mapping for players who signed up in Firebase). */
+function firebaseUid_(userId) {
+  if (!/^u_[A-Za-z0-9_]+$/.test(String(userId || ''))) throw apiError_('Unknown player.', 'invalid');
+  ensureFirebaseLogin_(userId);
+  return PropertiesService.getScriptProperties().getProperty('fbuid:' + userId);
+}
+
+/** Sets a player's PIN (they've forgotten it). Also counts as their move to the new app. */
+function adminResetPin_(admin, userId, pin) {
+  if (!/^\d{4}$/.test(String(pin))) throw apiError_('A PIN is 4 digits.', 'invalid');
+  if (userId === ADMIN_ID) throw apiError_('Change the admin PIN from the admin menu.', 'invalid');
+  const user = fsGet_('users', userId);
+  if (!user) throw apiError_('That player no longer exists.', 'invalid');
+  identity_('post', IDT + '/accounts:update', { localId: firebaseUid_(userId), password: 'dubs:' + pin + ':' + userId });
+  firestore_('patch', FS_DOCS + '/usernames/' + encodeURIComponent(user.username) + '?updateMask.fieldPaths=claimed', { fields: { claimed: { booleanValue: true } } });
+  return {};
+}
+
+/** Suspends (or restores) a player: their login stops working; their games stay. */
+function adminSuspend_(admin, userId, suspended) {
+  if (userId === ADMIN_ID) throw apiError_('The admin can’t be suspended.', 'invalid');
+  if (!fsGet_('users', userId)) throw apiError_('That player no longer exists.', 'invalid');
+  identity_('post', IDT + '/accounts:update', { localId: firebaseUid_(userId), disableUser: suspended });
+  const path = FS_DOCS + '/suspensions/' + encodeURIComponent(userId);
+  if (suspended) firestore_('patch', path, { fields: fsFields_({ at: new Date().toISOString() }) });
+  else firestore_('delete', path, null, true);
+  return { suspended: suspended };
+}
+
+/** Saves an announcement (shown on everyone's Notifications page) and pushes it to every phone. */
+function adminAnnounce_(admin, id, title, text) {
+  id = String(id || '');
+  title = String(title || '').trim().slice(0, 60);
+  text = String(text || '').trim().slice(0, 300);
+  if (!/^[A-Za-z0-9_-]{8,40}$/.test(id)) throw apiError_('Bad announcement id.', 'invalid');
+  if (!title) throw apiError_('Give the announcement a title.', 'invalid');
+  if (fsGet_('announcements', id)) return { sent: 0, phones: 0, duplicate: true }; // a retried send
+  firestore_('patch', FS_DOCS + '/announcements/' + id, { fields: fsFields_({ title: title, body: text, created_at: new Date().toISOString() }) });
+  const rows = firestore_('post', FS_DOCS + ':runQuery', { structuredQuery: { from: [{ collectionId: 'pushTokens' }] } });
+  const users = {};
+  (rows || []).forEach(function (row) {
+    if (row.document) users[fromFields_(row.document.fields).userId] = true;
+  });
+  let sent = 0;
+  Object.keys(users).forEach(function (uid) {
+    sent += sendPush_(uid, { title: title, body: text, url: './#notifications', tag: 'announcement-' + id });
+  });
+  return { sent: sent, phones: (rows || []).filter(function (r) { return r.document; }).length };
+}
+
 function google_(method, url, body, allowError) {
   const res = UrlFetchApp.fetch(url, {
     method: method,
@@ -613,6 +673,9 @@ function doPost(e) {
       case 'signIn': return signIn_(body.username, body.pin);
       case 'claimFirebase': return claimFirebase_(body.username, body.pin);
       case 'notify': return notify_(body.idToken, body.kind, body.id);
+      case 'adminResetPin': return adminResetPin_(requireAdmin_(body.idToken), body.userId, body.pin);
+      case 'adminSuspend': return adminSuspend_(requireAdmin_(body.idToken), body.userId, body.suspended === true);
+      case 'adminAnnounce': return adminAnnounce_(requireAdmin_(body.idToken), body.id, body.title, body.body);
       case 'signOut': return signOut_(body.token);
       case 'updateProfile': return updateProfile_(requireSession_(body.token), body.username, body.displayName, body.avatar);
       case 'changePin': return changePin_(requireSession_(body.token), body.currentPin, body.newPin);
@@ -637,10 +700,11 @@ function doPost(e) {
  * Once the app runs on Firebase (Script Property FIREBASE_LIVE = yes), this Sheet is a frozen backup:
  * an old copy of the app still open on a phone gets told to reopen, and nothing new lands here
  * (its unsent games stay on the phone and go to Firebase after the update). Only the one-time
- * PIN check for moving an account (claimFirebase) and push notifications (notify) keep working.
+ * PIN check for moving an account (claimFirebase), push notifications (notify) and the admin
+ * console's actions (admin…) keep working.
  */
 function refuseIfMoved_(action) {
-  if (action === 'claimFirebase' || action === 'notify') return;
+  if (action === 'claimFirebase' || action === 'notify' || /^admin/.test(String(action || ''))) return;
   if (PropertiesService.getScriptProperties().getProperty('FIREBASE_LIVE') === 'yes') {
     throw apiError_('Dubs just got faster! Close the app completely and open it again to update.', 'moved');
   }

@@ -6,7 +6,9 @@ import * as store from './store.js';
 import { isDemo, demoControls } from './api.js';
 import { esc, haptic, reducedMotion } from './ui.js';
 
-const PIN_LENGTH = 4;
+const PIN_LENGTH = 4; // the admin's is 8 (see store.pinLength)
+/** Digits in the signed-in account's PIN (remembered at sign-in). */
+const myPinLength = () => store.getPrefs().pinLength || PIN_LENGTH;
 const LOCAL_TRIES = 5;
 const KEYS = [
   ['1', ''], ['2', 'ABC'], ['3', 'DEF'],
@@ -149,11 +151,13 @@ function renderSignIn(prefill = '', error = '') {
   input.focus({ preventScroll: true });
 }
 
-function renderSignInPin(account, back) {
+async function renderSignInPin(account, back) {
+  const length = await store.pinLength(account.username);
   renderPin({
     user: account.id ? account : null,
     title: 'Enter PIN',
     subtitle: account.display_name || `@${account.username}`,
+    length,
     back,
     onPin: async (pin) => {
       await store.signIn(account.username, pin);
@@ -247,6 +251,7 @@ export function confirmPinFlow({ title = 'Enter Your PIN', subtitle = '' } = {})
       title,
       subtitle,
       message,
+      length: myPinLength(),
       leave: { label: 'Cancel', fn: () => hideLock() },
       onPin: async (pin) => {
         try {
@@ -267,23 +272,27 @@ export function confirmPinFlow({ title = 'Enter Your PIN', subtitle = '' } = {})
 
 // ---------- change PIN (from Settings) ----------
 
-/** Current PIN → new PIN → confirm, checked by the server. Resolves true if the PIN changed. */
-export function changePinFlow() {
+/**
+ * Current PIN → new PIN → confirm, checked by the server. Resolves true if the PIN changed.
+ * `newLength`: 8 for the admin. `title`/`intro` and `leave` let the admin console require it.
+ */
+export function changePinFlow({ newLength = PIN_LENGTH, intro = 'Enter the PIN you use now.', leave = null } = {}) {
   const el = root();
   el.classList.add('is-shown');
   el.getBoundingClientRect();
   el.classList.add('is-visible');
   document.getElementById('app').inert = true;
   let changed = false;
-  const cancel = { label: 'Cancel', fn: () => hideLock() };
+  const cancel = leave || { label: 'Cancel', fn: () => hideLock() };
   const user = store.state.me;
 
   const current = (message = '') =>
     renderPin({
       user,
       title: 'Current PIN',
-      subtitle: 'Enter the PIN you use now.',
+      subtitle: intro,
       message,
+      length: myPinLength(),
       leave: cancel,
       onPin: async (currentPin) => (next(currentPin), 'handled'),
     });
@@ -291,8 +300,9 @@ export function changePinFlow() {
     renderPin({
       user,
       title: 'New PIN',
-      subtitle: 'Choose 4 new digits.',
+      subtitle: `Choose ${newLength} new digits.`,
       message,
+      length: newLength,
       leave: cancel,
       onPin: async (newPin) => {
         if (newPin === currentPin) return next(currentPin, 'Pick a PIN that’s different from your current one.'), 'handled';
@@ -305,6 +315,7 @@ export function changePinFlow() {
       user,
       title: 'Confirm New PIN',
       subtitle: 'Enter the new PIN again.',
+      length: newLength,
       leave: cancel,
       onPin: async (again) => {
         if (again !== newPin) {
@@ -340,6 +351,7 @@ function renderLocalPin(message = '') {
     title: 'Enter PIN',
     subtitle: store.state.me?.display_name || '',
     message,
+    length: myPinLength(),
     leave: { label: 'Sign Out', fn: () => (store.signOut(), renderWelcome()) },
     onPin: async (pin) => {
       if (await store.verifyLocalPin(pin)) return 'done';
@@ -361,7 +373,7 @@ function renderLocalPin(message = '') {
  * onPin(pin) resolves 'done' (success: close the lock), 'handled' (it already moved on),
  * or throws an ApiError-like error that is shown under the dots.
  */
-function renderPin({ user = null, title, subtitle = '', message = '', back, leave, onPin }) {
+function renderPin({ user = null, title, subtitle = '', message = '', back, leave, onPin, length = PIN_LENGTH }) {
   let digits = '';
   let busy = false;
 
@@ -373,7 +385,7 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
         <h1 class="pin__title">${esc(title)}</h1>
         <p class="pin__for">${esc(subtitle)}</p>
       </div>
-      <div class="dots" aria-hidden="true">${'<span class="dot"></span>'.repeat(PIN_LENGTH)}</div>
+      <div class="dots${length > PIN_LENGTH ? ' dots--long' : ''}" aria-hidden="true">${'<span class="dot"></span>'.repeat(length)}</div>
       <p class="pin__msg" role="status" aria-live="polite">${esc(message)}</p>
       <div class="keypad" role="group" aria-label="PIN keypad">
         ${KEYS.map(([d, l]) => `<button type="button" class="key" data-digit="${d}" aria-label="${d}"><span class="key__digit">${d}</span><span class="key__letters">${l}</span></button>`).join('')}
@@ -424,10 +436,10 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
   const submit = async () => {
     busy = true;
     dotRow.classList.add('is-checking');
-    // Google Sheets can take a while: say so, so a slow answer doesn't look like a frozen app
+    // A first sign-in after the move can take a while: say so, so it doesn't look frozen
     const slow = [
       setTimeout(() => !msg.textContent && (msg.textContent = 'Checking…'), 1500),
-      setTimeout(() => (msg.textContent = 'Still working. Google Sheets is slow right now…'), 7000),
+      setTimeout(() => (msg.textContent = 'Still working…'), 7000),
     ];
     try {
       const result = await onPin(digits);
@@ -445,7 +457,7 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
       } else if (err.code === 'network') {
         fail('You’re offline. Check your connection.');
       } else if (err.code === 'timeout') {
-        fail('Google Sheets didn’t answer in time. Please try again.');
+        fail('The server didn’t answer in time. Please try again.');
       } else fail(err.message);
     } finally {
       slow.forEach(clearTimeout);
@@ -456,12 +468,12 @@ function renderPin({ user = null, title, subtitle = '', message = '', back, leav
   };
 
   const press = (d) => {
-    if (busy || digits.length >= PIN_LENGTH) return;
+    if (busy || digits.length >= length) return;
     haptic('light');
     digits += d;
     paint();
     if (msg.textContent && !countdown) msg.textContent = '';
-    if (digits.length === PIN_LENGTH) setTimeout(submit, 120);
+    if (digits.length === length) setTimeout(submit, 120);
   };
   const del = () => {
     if (busy || !digits) return;

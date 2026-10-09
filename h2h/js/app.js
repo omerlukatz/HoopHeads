@@ -6,6 +6,7 @@ import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, AVATARS, changePinFlow, confirmPinFlow } from './lock.js';
 import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
+import { startAdmin, stopAdmin } from './admin.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -140,7 +141,7 @@ document.addEventListener('click', (e) => {
 // "N" logs a new game on desktop keyboards
 document.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() !== 'n' || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (isLocked() || document.documentElement.classList.contains('has-modal') || e.target.closest('input, textarea, [contenteditable]')) return;
+  if (isLocked() || store.isAdmin() || document.documentElement.classList.contains('has-modal') || e.target.closest('input, textarea, [contenteditable]')) return;
   e.preventDefault();
   openGameSheet();
 });
@@ -2029,8 +2030,15 @@ function openNotifications() {
         <button type="button" class="btn btn--primary btn--block" data-push-on>Turn On Notifications</button>
       </article>`
         : '';
+    const news = n.announcements.map((a) => `
+      <article class="card notif-card notif-card--news">
+        <p class="notif-card__text"><span aria-hidden="true">📣 </span><strong>${esc(a.title)}</strong></p>
+        ${a.body ? `<p class="notif-card__body">${esc(a.body)}</p>` : ''}
+        <span class="notif-card__time">${esc(relativeTime(a.created_at))}</span>
+      </article>`).join('');
     body.innerHTML =
       pushCard +
+      section('From Dubs', news) +
       section('Needs Your Approval', incoming) + section('Waiting on Friends', outgoing) + section('Recent', answered) ||
       `<p class="notif-empty">No notifications.<br>When a friend asks to edit or delete a game, it shows up here for you to approve.</p>`;
   };
@@ -2392,12 +2400,14 @@ function onStoreChange(detail) {
     ui.signature = '';
     if (!state.session) {
       closeModals();
+      stopAdmin();
       showProfilePage(null);
       ui.resetSearch?.();
       lockAndStart(detail.deleted ? 'Your account was deleted.' : detail.expired ? 'Your session ended. Sign in again.' : '');
     }
     return;
   }
+  if (store.isAdmin()) return; // the admin console loads its own data
   if (detail.rival || detail.mode) (ui.shown = {}), (ui.calMonth = null); // new rivalry or game: fresh count-up, current month
   if (detail.mode && fp.userId) paintProfile(); // an open profile follows the game mode
   if (detail.saved) {
@@ -2421,6 +2431,12 @@ async function lockAndStart(message = '') {
 }
 
 function afterUnlock() {
+  if (store.isAdmin()) {
+    // The admin account gets the admin console instead of the app
+    started = true;
+    startAdmin({ openTeamPicker });
+    return;
+  }
   show(ui.screen);
   render();
   store.startAutoSync();
@@ -2464,7 +2480,7 @@ async function init() {
   if (!state.session) {
     await lockAndStart();
   } else {
-    render(); // instant from cache, before the network answers
+    if (!store.isAdmin()) render(); // instant from cache, before the network answers
     if (store.getPrefs().requirePin) await showLock({ local: true });
     afterUnlock();
   }

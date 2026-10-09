@@ -12,6 +12,7 @@ import { uuid, sha256 } from './crypto.js';
 import * as api from './api.js';
 import { sportOf } from './stats.js';
 import { CONFIG } from '../config.js';
+import { ADMIN_ID } from '../firebase-config.js';
 
 // Keys are namespaced by backend, so demo data never mixes with the real Sheet.
 const NS = api.isFirebase ? 'firebase' : api.isDemo ? 'demo' : CONFIG.APPS_SCRIPT_URL.split('/s/')[1]?.slice(0, 16) || 'remote';
@@ -71,6 +72,7 @@ export const state = {
   error: null,
   mode: '2k', // '2k' | 'fifa': which game's stats the app shows (see decideMode)
   requests: [], // edit/delete requests to or from you (see requestEdit / respondRequest)
+  announcements: [], // from the admin, newest first (shown on the Notifications page)
 };
 let outbox = [];
 
@@ -98,6 +100,7 @@ function loadAccount(userId) {
   state.rivalId = c.rivalId || null;
   state.serverGames = c.games || [];
   state.requests = c.requests || [];
+  state.announcements = c.announcements || [];
   state.loaded = Array.isArray(c.games);
   state.lastSynced = c.lastSynced || null;
   outbox = read(K.outbox(userId), []);
@@ -115,6 +118,7 @@ function persistCache() {
     rivalId: state.rivalId,
     games: state.serverGames,
     requests: state.requests,
+    announcements: state.announcements,
     lastSynced: state.lastSynced,
   });
 }
@@ -226,7 +230,7 @@ export function forgetAccount(userId) {
   write(K.accounts, deviceAccounts().filter((a) => a.id !== userId));
 }
 
-async function startSession({ token, user, friends, games, requests = [] }, pin) {
+async function startSession({ token, user, friends, games, requests = [], announcements = [] }, pin) {
   state.session = { token, userId: user.id };
   write(K.session, state.session);
   loadAccount(user.id);
@@ -236,13 +240,13 @@ async function startSession({ token, user, friends, games, requests = [] }, pin)
   // round trip. (Older servers don't send them; then the sync below fetches them.)
   const haveData = Array.isArray(friends) && Array.isArray(games);
   if (haveData) {
-    Object.assign(state, { friends: friends.map(tidy), serverGames: games, requests, lastSynced: now(), loaded: true });
+    Object.assign(state, { friends: friends.map(tidy), serverGames: games, requests, announcements, lastSynced: now(), loaded: true });
     rebuild();
     decideMode();
     pickRival();
   }
   // Local hash so "Require PIN on open" works offline. It's tied to this session's token.
-  setPrefs({ pinHash: await sha256(`${token}:${pin}`) });
+  setPrefs({ pinHash: await sha256(`${token}:${pin}`), pinLength: String(pin).length });
   persistCache();
   emit({ session: true });
   if (!haveData || outbox.length) sync();
@@ -279,7 +283,7 @@ export async function verifyLocalPin(pin) {
 export function signOut({ expired = false, local = false, deleted = false } = {}) {
   if (state.session && !expired && !local) api.signOut(state.session.token).catch(() => {});
   state.session = null;
-  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], requests: [], loaded: false, lastSynced: null, status: 'idle', error: null });
+  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], requests: [], announcements: [], loaded: false, lastSynced: null, status: 'idle', error: null });
   outbox = [];
   localStorage.removeItem(K.session);
   setPrefs({ pinHash: null });
@@ -303,7 +307,7 @@ export async function changePin(currentPin, newPin) {
   const { token } = await api.changePin(state.session.token, currentPin, newPin);
   state.session = { ...state.session, token };
   write(K.session, state.session);
-  setPrefs({ pinHash: await sha256(`${token}:${newPin}`) });
+  setPrefs({ pinHash: await sha256(`${token}:${newPin}`), pinLength: String(newPin).length });
 }
 
 // ---------- friends ----------
@@ -382,7 +386,9 @@ export function notifications() {
     .filter((r) => r.from_id === me && (r.status === 'approved' || r.status === 'declined'))
     .sort((a, b) => b.resolved_at.localeCompare(a.resolved_at));
   const unseenAnswers = answered.filter((r) => r.resolved_at > seen).length;
-  return { incoming, outgoing, answered, badge: incoming.length + unseenAnswers };
+  const announcements = state.announcements;
+  const unseenAnnouncements = announcements.filter((a) => a.created_at > seen).length;
+  return { incoming, outgoing, answered, announcements, badge: incoming.length + unseenAnswers + unseenAnnouncements };
 }
 export function markNotificationsSeen() {
   const seen = getPrefs().notificationsSeen;
@@ -392,6 +398,24 @@ export function markNotificationsSeen() {
 // ---------- delete account ----------
 
 export const verifyPin = (pin) => api.verifyPin(state.session.token, pin);
+
+// ---------- admin ----------
+/** The admin account gets the admin console instead of the normal app. */
+export const isAdmin = () => state.session?.userId === ADMIN_ID;
+/** Digits in this username's PIN (8 for the admin once it's set up). */
+export const pinLength = (username) => api.pinLength(username);
+export const admin = {
+  load: () => api.adminLoad(),
+  saveGame: (game, summary) => api.adminSaveGame(game, summary),
+  deleteGame: (id, summary) => api.adminDeleteGame(id, summary),
+  setFriends: (a, b, friends, summary) => api.adminSetFriends(a, b, friends, summary),
+  history: () => api.adminHistory(),
+  resetPin: (userId, pin, summary) => api.adminResetPin(userId, pin, summary),
+  suspend: (userId, suspended, summary) => api.adminSuspend(userId, suspended, summary),
+  announce: (id, title, body) => api.adminAnnounce(id, title, body),
+  announcements: () => api.adminAnnouncements(),
+  removeAnnouncement: (id, title) => api.adminRemoveAnnouncement(id, title),
+};
 
 // ---------- push notifications (this phone) ----------
 export const pushStatus = () => (state.session ? api.pushStatus(state.session.userId) : 'off');
@@ -524,9 +548,9 @@ async function syncOnce() {
   try {
     const hadPending = outbox.length > 0;
     await flush();
-    const { me, friends, games, requests = [] } = await fetchAll(session.token);
+    const { me, friends, games, requests = [], announcements = [] } = await fetchAll(session.token);
     if (state.session !== session) return; // signed out while this was in flight
-    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, requests, lastSynced: now(), loaded: true });
+    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, requests, announcements, lastSynced: now(), loaded: true });
     rememberAccount(me);
     rebuild();
     decideMode();
