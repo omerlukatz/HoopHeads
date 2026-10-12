@@ -684,6 +684,7 @@ export function createDemoBackend(ApiError) {
       } else if (t.status === 'live' && t.answers[user.id] === 'accepted') {
         const next = nextHost(t, user.id);
         if (next) t.host = next;
+        else if (hostOf(t) === user.id) Object.assign(t, { status: 'cancelled', cancelled_at: new Date().toISOString() });
         t.answers[user.id] = 'left';
         (t.left ||= {})[user.id] = new Date().toISOString();
       }

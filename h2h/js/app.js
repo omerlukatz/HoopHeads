@@ -2598,7 +2598,7 @@ function render(detail = {}) {
   ui.stats = computeStats(pair, meId());
   renderSync();
   renderBell();
-  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode, state.requests, state.tournaments, state.tournamentGames]);
+  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode, state.requests, state.tournaments, state.tournamentGames, state.trophies]);
   if (sig !== ui.signature) {
     ui.signature = sig;
     renderDashboard();

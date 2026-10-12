@@ -473,6 +473,7 @@ export function createFirebaseBackend(ApiError) {
       stopLive(); // its listeners would fail once the profile is gone
       setWanted(id, false);
       await forgetPush(f);
+      await leaveTournaments(f, id); // while the rules still know you
       const profile = await f.getDoc(ref(f, 'users', id));
       const [friendsA, friendsB, blocksMine, blocksTheirs, reqFrom, reqTo, games] = await Promise.all([
         where(f, 'friendships', 'user_a', '==', id),
@@ -629,18 +630,23 @@ export function createFirebaseBackend(ApiError) {
       const existing = await f.getDoc(ref(f, 'games', String(game.id)));
       if (existing.exists()) return gameOut(existing.data()); // a retry of an add that already landed
       const other = game.player1_id === me ? game.player2_id : game.player1_id;
+      // A tournament game: both players are still in it (they don't have to be friends)
+      let counts = false;
       if (game.tournament_id) {
-        // A tournament game: both players are in the bracket (they don't have to be friends)
-        const t = (await f.getDoc(ref(f, 'tournaments', String(game.tournament_id)))).data();
+        const t = (await f.getDoc(ref(f, 'tournaments', String(game.tournament_id))).catch(() => null))?.data();
         const placed = t ? t.seeds || (t.groups || []).flatMap(groupIds) : [];
-        if (!t || t.status !== 'live' || !placed.includes(me) || !placed.includes(other) || t.sport !== (game.sport === 'fifa' ? 'fifa' : '2k')) {
-          throw new ApiError('That game can’t count for this tournament.', 'invalid');
-        }
-      } else if (!(await f.getDoc(ref(f, 'friendships', pairId(me, other)))).exists()) throw new ApiError('You can only log games against your friends.', 'invalid');
+        counts = Boolean(t && t.status === 'live' && t.sport === (game.sport === 'fifa' ? 'fifa' : '2k')
+          && placed.includes(me) && placed.includes(other) && t.answers?.[me] === 'accepted' && t.answers?.[other] === 'accepted');
+      }
+      // Otherwise it's an ordinary game, between friends. (A tournament game logged offline whose
+      // tournament ended meanwhile is still kept, just without counting for it.)
+      if (!counts && !(await f.getDoc(ref(f, 'friendships', pairId(me, other)))).exists()) {
+        throw new ApiError(game.tournament_id ? 'That game can’t count for this tournament any more.' : 'You can only log games against your friends.', 'invalid');
+      }
       const stamp = now();
       const doc = { ...cleanGame(game, me), created_by: me, created_at: game.created_at || stamp, updated_at: stamp, deleted: false, last_request: '' };
-      if (game.tournament_id) doc.tournament_id = String(game.tournament_id); // counts for a tournament series
-      if (game.tournament_id && game.tournament_stage === 'group') doc.tournament_stage = 'group'; // a group-stage game
+      if (counts) doc.tournament_id = String(game.tournament_id); // counts for a tournament series
+      if (counts && game.tournament_stage === 'group') doc.tournament_stage = 'group'; // a group-stage game
       await f.setDoc(ref(f, 'games', doc.id), doc);
       notify(f, 'game', doc.id);
       return gameOut(doc);
@@ -868,9 +874,30 @@ export function createFirebaseBackend(ApiError) {
       const patch = { [`answers.${me}`]: 'left', [`left.${me}`]: now() };
       const next = nextHost(t, me);
       if (next) patch.host = next; // the host quit: the next player still in runs it
-      await f.updateDoc(ref(f, 'tournaments', id), patch);
+      // The host was the last one in: nobody can play it any more, so it ends
+      const last = !next && hostOf(t) === me;
+      await f.updateDoc(ref(f, 'tournaments', id), last ? { status: 'cancelled', cancelled_at: now() } : patch);
       return {};
     });
+  }
+
+  /** Deleting your account: you quit the tournaments you're in (the ones you host and haven't started are cancelled). */
+  async function leaveTournaments(f, me) {
+    for (const t of await where(f, 'tournaments', 'players', 'array-contains', me)) {
+      const r = ref(f, 'tournaments', t.id);
+      const answer = t.answers?.[me];
+      let patch = null;
+      if (t.status === 'inviting') {
+        if (t.creator === me) patch = { status: 'cancelled', cancelled_at: now() };
+        else if (answer === 'pending' || answer === 'accepted') patch = { [`answers.${me}`]: 'declined' };
+      } else if (t.status === 'live' && answer === 'accepted') {
+        patch = { [`answers.${me}`]: 'left', [`left.${me}`]: now() };
+        const next = nextHost(t, me);
+        if (next) patch.host = next;
+        else if (hostOf(t) === me) patch = { status: 'cancelled', cancelled_at: now() }; // nobody left to run it
+      }
+      if (patch) await f.updateDoc(r, patch).catch(() => {});
+    }
   }
 
   /** Every game of these players (for seeding and the seed preview). */
