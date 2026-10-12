@@ -430,8 +430,19 @@ function notify_(idToken, kind, id) {
   if (cache.get(key)) return { sent: 0 }; // already sent (e.g. a retried request)
   const msg = notification_(me, String(kind || ''), String(id || ''));
   if (!msg) return { sent: 0 };
-  cache.put(key, '1', 21600);
-  return { sent: sendPush_(msg.to, msg) };
+  if (!msg.perPerson) cache.put(key, '1', 21600);
+  // Tournament pushes go to several players; each is told once (an invite, a start, one nudge)
+  const to = [].concat(msg.to).filter(function (uid) {
+    if (!uid || uid === me) return false;
+    if (!msg.perPerson) return true;
+    const k = ('notified:' + msg.perPerson + ':' + uid).slice(0, 240);
+    if (cache.get(k)) return false;
+    cache.put(k, '1', 21600);
+    return true;
+  });
+  let sent = 0;
+  to.forEach(function (uid) { sent += sendPush_(uid, msg); });
+  return { sent: sent };
 }
 
 /** The user id behind a Firebase sign-in token, or null if it isn't valid. */
@@ -490,12 +501,42 @@ function notification_(me, kind, id) {
     const body = !approved ? 'The game stays as it was.' : r.kind === 'delete' ? 'The game was deleted.' : 'The game was updated.';
     return { to: r.from_id, title: nameOf(me) + (approved ? ' approved' : ' declined') + ' your request', body: body, url: './#notifications', tag: 'response-' + id };
   }
+  if (kind === 'tournament' || kind === 'tournament-start' || kind === 'tournament-nudge') return tournamentNotification_(me, kind, id, nameOf);
   if (kind === 'friend') {
     const f = fsGet_('friendships', id);
     if (!f || (f.user_a !== me && f.user_b !== me) || !recent_(f.created_at)) return null;
     return { to: f.user_a === me ? f.user_b : f.user_a, title: nameOf(me) + ' added you on Dubs', body: 'Log your first game against them.', url: './#friends', tag: 'friend-' + id };
   }
   return null;
+}
+
+/**
+ * Tournaments: an invite ('tournament': whoever `me` just invited and hasn't answered), the start
+ * ('tournament-start': everyone in it), and "Ready to play?" ('tournament-nudge', id "<tid>:<to>").
+ */
+function tournamentNotification_(me, kind, id, nameOf) {
+  const tid = kind === 'tournament-nudge' ? id.split(':')[0] : id;
+  const t = fsGet_('tournaments', tid);
+  if (!t || !t.players || t.players.indexOf(me) < 0) return null;
+  const answers = t.answers || {};
+  const title = String(t.name || 'A tournament');
+  const game = MODE_NAMES_[t.sport] || 'NBA 2K';
+  const page = './#friends/t-' + tid;
+  if (kind === 'tournament') {
+    if (t.status !== 'inviting' || answers[me] !== 'accepted') return null;
+    const invited = t.players.filter(function (p) { return answers[p] === 'pending' && (t.invited_by || {})[p] === me; });
+    if (!invited.length) return null;
+    return { to: invited, perPerson: 'tinv:' + tid, title: nameOf(me) + ' invited you to ' + title, body: game + ' tournament \u00b7 ' + t.players.length + ' players. Tap to join or decline.', url: './#notifications', tag: 'tournament-' + tid };
+  }
+  if (kind === 'tournament-start') {
+    if (t.status !== 'live' || !recent_(t.started_at)) return null;
+    const playing = t.players.filter(function (p) { return answers[p] === 'accepted'; });
+    return { to: playing, perPerson: 'tstart:' + tid, title: title + ' has started', body: 'The ' + (t.format === 'groups' ? 'groups are' : 'bracket is') + ' set. Tap to see who you play first.', url: page, tag: 'tournament-' + tid };
+  }
+  const to = id.split(':')[1];
+  const n = (t.nudges || {})[to];
+  if (t.status !== 'live' || !n || n.from !== me || !recent_(n.at) || answers[to] !== 'accepted') return null;
+  return { to: to, perPerson: 'tnudge:' + tid + ':' + n.at, title: nameOf(me) + ' is ready to play', body: 'Your ' + title + ' series is waiting. Tap to see it.', url: page, tag: 'nudge-' + tid };
 }
 
 /** Sends to every phone of `userId` that has notifications on; forgets phones that turned them off. */
