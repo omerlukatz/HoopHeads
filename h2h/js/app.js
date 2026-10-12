@@ -1231,13 +1231,15 @@ function teamTile(side, abbr, opponentName = oppName()) {
  * From a tournament bracket: `opponent` (who may not be your friend) and `tournament` are given.
  */
 // A new game you started but didn't save (closed, cancelled, or left the app) is kept per account
-// and game mode, and comes back the next time you open New Game. Saving it clears it.
+// and game mode for a minute, so reopening New Game right away brings it back. Saving it clears it.
 const GAME_DRAFT_KEY = (sport) => `h2h.gameDraft.v1:${meId()}:${sport}`;
-const GAME_DRAFT_MAX_AGE = 3 * 24 * 3600 * 1000;
+const GAME_DRAFT_MAX_AGE = 60 * 1000;
 function loadGameDraft(sport) {
   try {
     const d = JSON.parse(localStorage.getItem(GAME_DRAFT_KEY(sport)) || 'null');
-    return d && Date.now() - d.savedAt < GAME_DRAFT_MAX_AGE ? d : null;
+    if (d && Date.now() - d.savedAt < GAME_DRAFT_MAX_AGE) return d;
+    if (d) localStorage.removeItem(GAME_DRAFT_KEY(sport)); // too old: back to a blank game
+    return null;
   } catch {
     return null;
   }
@@ -1308,7 +1310,6 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
     </header>
     <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
       ${banner ? `<p class="edit-banner">${banner}</p>` : ''}
-      ${restored ? '<p class="edit-banner" data-draft-banner>Picked up where you left off. <button type="button" class="link" data-sheet="start-over">Start Over</button></p>' : ''}
       <div class="matchup">
         <div class="side">
           <span class="side__name">You</span>
@@ -1461,12 +1462,6 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
     }
     const act = e.target.closest('[data-sheet]')?.dataset.sheet;
     if (act === 'cancel') sheet.close();
-    if (act === 'start-over') {
-      saved = true; // stop the closing sheet from keeping it again
-      clearGameDraft(sport);
-      await sheet.close();
-      openGameSheet({ opponent: forced, tournament });
-    }
     if (act === 'delete') {
       sheet.close();
       removeGame(source.id, opponent.display_name);
