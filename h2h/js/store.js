@@ -11,6 +11,7 @@
 import { uuid, sha256 } from './crypto.js';
 import * as api from './api.js';
 import { sportOf } from './stats.js';
+import { buildBracket } from './tournament.js';
 import { CONFIG } from '../config.js';
 import { ADMIN_ID } from '../firebase-config.js';
 
@@ -73,6 +74,9 @@ export const state = {
   mode: '2k', // '2k' | 'fifa': which game's stats the app shows (see decideMode)
   requests: [], // edit/delete requests to or from you (see requestEdit / respondRequest)
   announcements: [], // from the admin, newest first (shown on the Notifications page)
+  tournaments: [], // you're invited to or playing in (see tournament.js)
+  tournamentGames: [], // every game of your live tournaments (for the brackets)
+  trophies: [], // tournament wins of you and your friends: { id, winner, name, sport, date }
 };
 let outbox = [];
 
@@ -101,6 +105,9 @@ function loadAccount(userId) {
   state.serverGames = c.games || [];
   state.requests = c.requests || [];
   state.announcements = c.announcements || [];
+  state.tournaments = c.tournaments || [];
+  state.tournamentGames = c.tournamentGames || [];
+  state.trophies = c.trophies || [];
   state.loaded = Array.isArray(c.games);
   state.lastSynced = c.lastSynced || null;
   outbox = read(K.outbox(userId), []);
@@ -119,6 +126,9 @@ function persistCache() {
     games: state.serverGames,
     requests: state.requests,
     announcements: state.announcements,
+    tournaments: state.tournaments,
+    tournamentGames: state.tournamentGames,
+    trophies: state.trophies,
     lastSynced: state.lastSynced,
   });
 }
@@ -230,7 +240,7 @@ export function forgetAccount(userId) {
   write(K.accounts, deviceAccounts().filter((a) => a.id !== userId));
 }
 
-async function startSession({ token, user, friends, games, requests = [], announcements = [] }, pin) {
+async function startSession({ token, user, friends, games, requests = [], announcements = [], tournaments = [], tournamentGames = [], trophies = [] }, pin) {
   state.session = { token, userId: user.id };
   write(K.session, state.session);
   loadAccount(user.id);
@@ -240,7 +250,7 @@ async function startSession({ token, user, friends, games, requests = [], announ
   // round trip. (Older servers don't send them; then the sync below fetches them.)
   const haveData = Array.isArray(friends) && Array.isArray(games);
   if (haveData) {
-    Object.assign(state, { friends: friends.map(tidy), serverGames: games, requests, announcements, lastSynced: now(), loaded: true });
+    Object.assign(state, { friends: friends.map(tidy), serverGames: games, requests, announcements, tournaments, tournamentGames, trophies, lastSynced: now(), loaded: true });
     rebuild();
     decideMode();
     pickRival();
@@ -283,7 +293,7 @@ export async function verifyLocalPin(pin) {
 export function signOut({ expired = false, local = false, deleted = false } = {}) {
   if (state.session && !expired && !local) api.signOut(state.session.token).catch(() => {});
   state.session = null;
-  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], requests: [], announcements: [], loaded: false, lastSynced: null, status: 'idle', error: null });
+  Object.assign(state, { me: null, friends: [], rivalId: null, serverGames: [], games: [], requests: [], announcements: [], tournaments: [], tournamentGames: [], trophies: [], loaded: false, lastSynced: null, status: 'idle', error: null });
   outbox = [];
   localStorage.removeItem(K.session);
   setPrefs({ pinHash: null });
@@ -388,8 +398,11 @@ export function notifications() {
   const unseenAnswers = answered.filter((r) => r.resolved_at > seen).length;
   const announcements = state.announcements;
   const unseenAnnouncements = announcements.filter((a) => a.created_at > seen).length;
-  return { incoming, outgoing, answered, announcements, badge: incoming.length + unseenAnswers + unseenAnnouncements };
+  const invites = state.tournaments.filter((t) => t.status === 'inviting' && t.answers?.[me] === 'pending');
+  return { incoming, outgoing, answered, announcements, invites, badge: incoming.length + unseenAnswers + unseenAnnouncements + invites.length };
 }
+/** When you last opened the Notifications page (per account). */
+export const notificationsSeenAt = () => (getPrefs().notificationsSeen || {})[state.session?.userId] || '';
 export function markNotificationsSeen() {
   const seen = getPrefs().notificationsSeen;
   setPrefs({ notificationsSeen: { ...(seen && typeof seen === 'object' ? seen : {}), [state.session.userId]: now() } });
@@ -398,6 +411,46 @@ export function markNotificationsSeen() {
 // ---------- delete account ----------
 
 export const verifyPin = (pin) => api.verifyPin(state.session.token, pin);
+
+// ---------- tournaments ----------
+/** Every game of a tournament: the server's, plus yours that are still on their way. */
+export function gamesOf(tournamentId) {
+  const byId = new Map(state.tournamentGames.filter((g) => g.tournament_id === tournamentId).map((g) => [g.id, g]));
+  for (const g of state.games) if (g.tournament_id === tournamentId) byId.set(g.id, g);
+  return [...byId.values()].filter((g) => !g.deleted);
+}
+/** Runs a tournament change, then refreshes so every screen shows it. */
+async function afterTournament(promise) {
+  const result = await promise;
+  await sync();
+  return result;
+}
+export const createTournament = (opts) => afterTournament(api.createTournament(state.session.token, opts));
+export const inviteToTournament = (id, players) => afterTournament(api.inviteToTournament(state.session.token, id, players));
+export const respondTournament = (id, accept) => afterTournament(api.respondTournament(state.session.token, id, accept));
+export const startTournament = (id, seeds = null) => afterTournament(api.startTournament(state.session.token, id, seeds));
+export const cancelTournament = (id) => afterTournament(api.cancelTournament(state.session.token, id));
+export const updateTournament = (id, patch) => afterTournament(api.updateTournament(state.session.token, id, patch));
+export const quitTournament = (id) => afterTournament(api.quitTournament(state.session.token, id));
+export const decideSeries = (id, key, winner) => afterTournament(api.decideSeries(state.session.token, id, key, winner));
+export const replacePlayer = (id, oldId, newId) => afterTournament(api.replacePlayer(state.session.token, id, oldId, newId));
+export const nudge = (id, toId) => afterTournament(api.nudge(state.session.token, id, toId));
+export const playerRecords = (ids, sport) => api.playerRecords(state.session.token, ids, sport);
+/** How many tournaments this player has won (from the trophies of you and your friends). */
+export const trophiesOf = (userId) => state.trophies.filter((x) => x.winner === userId);
+
+/** A finished tournament gets its trophy written once (by whoever sees it finish first). */
+const trophyAsked = new Set();
+function recordTrophies() {
+  for (const t of state.tournaments) {
+    if (t.status !== 'live' || trophyAsked.has(t.id) || state.trophies.some((x) => x.id === t.id)) continue;
+    const b = buildBracket(t, gamesOf(t.id));
+    if (!b.champion) continue;
+    trophyAsked.add(t.id);
+    api.recordTrophy(state.session.token, t, b.champion).catch(() => trophyAsked.delete(t.id));
+  }
+}
+export const demoSimulate = api.demoSimulate ? (id) => afterTournament(api.demoSimulate(state.session.token, id)) : null;
 
 // ---------- admin ----------
 /** The admin account gets the admin console instead of the normal app. */
@@ -548,10 +601,11 @@ async function syncOnce() {
   try {
     const hadPending = outbox.length > 0;
     await flush();
-    const { me, friends, games, requests = [], announcements = [] } = await fetchAll(session.token);
+    const { me, friends, games, requests = [], announcements = [], tournaments = [], tournamentGames = [], trophies = [] } = await fetchAll(session.token);
     if (state.session !== session) return; // signed out while this was in flight
-    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, requests, announcements, lastSynced: now(), loaded: true });
+    Object.assign(state, { me: tidy(me), friends: friends.map(tidy), serverGames: games, requests, announcements, tournaments, tournamentGames, trophies, lastSynced: now(), loaded: true });
     rememberAccount(me);
+    recordTrophies();
     rebuild();
     decideMode();
     pickRival();

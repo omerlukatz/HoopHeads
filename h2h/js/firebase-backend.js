@@ -8,6 +8,7 @@
 // sign in here, the old Apps Script checks their PIN once and sets their Firebase password ("claim").
 import { FIREBASE_CONFIG, VAPID_KEY, ADMIN_ID, ADMIN_USERNAME } from '../firebase-config.js';
 import { CONFIG } from '../config.js';
+import { drawFor, checkLayout, storedLayout, cleanSettings, cleanName, groupIds, recordOf, accepted, allAnswered, hostOf, nextHost, MIN_PLAYERS, MAX_PLAYERS } from './tournament.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
 const EMAIL_DOMAIN = 'users.hoophead.xyz';
@@ -146,7 +147,12 @@ export function createFirebaseBackend(ApiError) {
   }
 
   function startLive(f, me) {
-    const parts = { me: undefined, fa: undefined, fb: undefined, games: undefined, rf: undefined, rt: undefined, ann: undefined };
+    const parts = { me: undefined, fa: undefined, fb: undefined, games: undefined, rf: undefined, rt: undefined, ann: undefined, tours: undefined };
+    // Games of your live tournaments (everyone's, for the bracket), by tournament id list
+    const tourGames = new Map();
+    let tourKey = null;
+    let tourUnsubs = [];
+    let toursReady = false;
     const friendDocs = new Map();
     let friendKey = null;
     let friendUnsubs = [];
@@ -155,7 +161,7 @@ export function createFirebaseBackend(ApiError) {
     const session = { me, failed: null, ready: new Promise((r) => (resolveReady = r)) };
     let initial = true;
 
-    const settled = () => Object.values(parts).every((v) => v !== undefined) && friendsReady;
+    const settled = () => Object.values(parts).every((v) => v !== undefined) && friendsReady && toursReady;
     const changed = () => {
       if (initial) {
         if (settled()) (initial = false), resolveReady();
@@ -168,10 +174,26 @@ export function createFirebaseBackend(ApiError) {
     };
     const docs = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+    // Tournament wins of you and your friends (for profiles and the Friends list)
+    const trophies = new Map();
+    let trophyUnsubs = [];
+    function watchTrophies(ids) {
+      trophyUnsubs.forEach((off) => off());
+      trophies.clear();
+      trophyUnsubs = chunk([me, ...ids], 30).map((part) =>
+        f.onSnapshot(f.query(f.collection(f.db, 'trophies'), f.where('winner', 'in', part)), (snap) => {
+          [...trophies.values()].filter((x) => part.includes(x.winner)).forEach((x) => trophies.delete(x.id));
+          snap.forEach((d) => trophies.set(d.id, { id: d.id, ...d.data() }));
+          if (!initial) notifyChange();
+        }, () => {}),
+      );
+    }
+
     function watchFriends() {
       if (parts.fa === undefined || parts.fb === undefined) return;
       const ids = [...new Set([...parts.fa.map((x) => x.user_b), ...parts.fb.map((x) => x.user_a)])].sort();
       if (ids.join() === friendKey) return;
+      watchTrophies(ids);
       friendKey = ids.join();
       friendUnsubs.forEach((off) => off());
       friendDocs.clear();
@@ -187,9 +209,33 @@ export function createFirebaseBackend(ApiError) {
       }, fail));
     }
 
+    function watchTourGames() {
+      if (parts.tours === undefined) return;
+      const ids = parts.tours.filter((t) => t.status === 'live').map((t) => t.id).sort();
+      if (ids.join() === tourKey) return;
+      tourKey = ids.join();
+      tourUnsubs.forEach((off) => off());
+      tourGames.clear();
+      const parts30 = chunk(ids, 30);
+      const seen = new Set();
+      toursReady = parts30.length === 0;
+      tourUnsubs = parts30.map((part, i) => f.onSnapshot(f.query(f.collection(f.db, 'games'), f.where('tournament_id', 'in', part)), (snap) => {
+        [...tourGames.keys()].filter((k) => part.includes(tourGames.get(k).tournament_id)).forEach((k) => tourGames.delete(k));
+        snap.forEach((d) => tourGames.set(d.id, gameOut({ id: d.id, ...d.data() })));
+        seen.add(i);
+        if (seen.size === parts30.length) toursReady = true;
+        changed();
+      }, () => {
+        seen.add(i); // the bracket just shows fewer results
+        if (seen.size === parts30.length) toursReady = true;
+        changed();
+      }));
+    }
+
     const listen = (key, q, onError = fail) => f.onSnapshot(q, (snap) => {
       parts[key] = key === 'me' ? (snap.exists() ? pub(me, snap.data()) : null) : docs(snap);
       if (key === 'fa' || key === 'fb') watchFriends();
+      if (key === 'tours') watchTourGames();
       changed();
     }, onError);
     const qWhere = (coll, field, op, value) => f.query(f.collection(f.db, coll), f.where(field, op, value));
@@ -205,11 +251,17 @@ export function createFirebaseBackend(ApiError) {
         parts.ann = [];
         changed();
       }),
+      // Tournaments you're invited to or playing in (extra, like announcements)
+      listen('tours', qWhere('tournaments', 'players', 'array-contains', me), () => {
+        parts.tours = [];
+        watchTourGames();
+        changed();
+      }),
     ];
     watchFriends();
 
     session.stop = () => {
-      [...unsubs, ...friendUnsubs].forEach((off) => off());
+      [...unsubs, ...friendUnsubs, ...tourUnsubs, ...trophyUnsubs].forEach((off) => off());
       session.failed ||= new ApiError('Your session has ended. Sign in again.', 'auth');
       resolveReady();
     };
@@ -226,6 +278,9 @@ export function createFirebaseBackend(ApiError) {
         games: parts.games.filter((g) => !g.deleted).map(gameOut),
         requests: [...parts.rf, ...parts.rt].filter((r) => r.status === 'pending' || ((r.status === 'approved' || r.status === 'declined') && String(r.resolved_at) >= since)),
         announcements: parts.ann.filter((a) => String(a.created_at) >= announcementsSince()),
+        tournaments: parts.tours,
+        tournamentGames: [...tourGames.values()].filter((g) => !g.deleted),
+        trophies: [...trophies.values()],
       };
     };
     return session;
@@ -301,7 +356,7 @@ export function createFirebaseBackend(ApiError) {
       }
       await releasePushFromOtherAccount(f, userId);
       const data = await snapshot(f, userId);
-      return { token: userId, user: data.me, friends: data.friends, games: data.games, requests: data.requests, announcements: data.announcements };
+      return { token: userId, user: data.me, friends: data.friends, games: data.games, requests: data.requests, announcements: data.announcements, tournaments: data.tournaments, tournamentGames: data.tournamentGames, trophies: data.trophies };
     });
   }
 
@@ -574,9 +629,18 @@ export function createFirebaseBackend(ApiError) {
       const existing = await f.getDoc(ref(f, 'games', String(game.id)));
       if (existing.exists()) return gameOut(existing.data()); // a retry of an add that already landed
       const other = game.player1_id === me ? game.player2_id : game.player1_id;
-      if (!(await f.getDoc(ref(f, 'friendships', pairId(me, other)))).exists()) throw new ApiError('You can only log games against your friends.', 'invalid');
+      if (game.tournament_id) {
+        // A tournament game: both players are in the bracket (they don't have to be friends)
+        const t = (await f.getDoc(ref(f, 'tournaments', String(game.tournament_id)))).data();
+        const placed = t ? t.seeds || (t.groups || []).flatMap(groupIds) : [];
+        if (!t || t.status !== 'live' || !placed.includes(me) || !placed.includes(other) || t.sport !== (game.sport === 'fifa' ? 'fifa' : '2k')) {
+          throw new ApiError('That game can’t count for this tournament.', 'invalid');
+        }
+      } else if (!(await f.getDoc(ref(f, 'friendships', pairId(me, other)))).exists()) throw new ApiError('You can only log games against your friends.', 'invalid');
       const stamp = now();
       const doc = { ...cleanGame(game, me), created_by: me, created_at: game.created_at || stamp, updated_at: stamp, deleted: false, last_request: '' };
+      if (game.tournament_id) doc.tournament_id = String(game.tournament_id); // counts for a tournament series
+      if (game.tournament_id && game.tournament_stage === 'group') doc.tournament_stage = 'group'; // a group-stage game
       await f.setDoc(ref(f, 'games', doc.id), doc);
       notify(f, 'game', doc.id);
       return gameOut(doc);
@@ -682,6 +746,249 @@ export function createFirebaseBackend(ApiError) {
       if (snap.data().from_id !== me) throw new ApiError('Only the person who asked can cancel this.', 'invalid');
       await f.updateDoc(ref(f, 'requests', requestId), { status: 'cancelled', resolved_at: now() });
       return {};
+    });
+  }
+
+  // ---------- tournaments ----------
+  // See tournament.js. The doc says who's in it and its rules; the games say how it's going.
+
+  const profileOf = (u) => ({ display_name: u.display_name, username: u.username, color: u.color, initial: u.initial, avatar: u.avatar });
+  async function tournamentDoc(f, id) {
+    const snap = await f.getDoc(ref(f, 'tournaments', id));
+    if (!snap.exists()) throw new ApiError('That tournament no longer exists.', 'invalid');
+    return { id, ...snap.data() };
+  }
+  const mustBeHost = (t, me) => {
+    if (hostOf(t) !== me) throw new ApiError('Only the host can do that.', 'invalid');
+  };
+  const mustBe = (t, status) => {
+    if (t.status !== status) throw new ApiError(status === 'inviting' ? 'This tournament has already started or was cancelled.' : 'This tournament isn’t being played right now.', 'invalid');
+  };
+
+  async function createTournament(token, opts = {}) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const title = cleanName(opts.name);
+      if (!title) throw new ApiError('Give the tournament a name (up to 40 characters).', 'invalid');
+      const invited = [...new Set((opts.players || []).filter((id) => id && id !== me))];
+      if (invited.length + 1 < MIN_PLAYERS) throw new ApiError(`Invite at least ${MIN_PLAYERS - 1} friends.`, 'invalid');
+      if (invited.length + 1 > MAX_PLAYERS) throw new ApiError(`A tournament can have up to ${MAX_PLAYERS} players.`, 'invalid');
+      const friendIds = await friendIdsOf(f, me);
+      if (invited.some((id) => !friendIds.includes(id))) throw new ApiError('You can only invite your friends.', 'invalid');
+      const t = {
+        name: title,
+        ...cleanSettings(opts),
+        creator: me,
+        created_at: now(),
+        status: 'inviting',
+        players: [me, ...invited],
+        answers: Object.fromEntries([[me, 'accepted'], ...invited.map((id) => [id, 'pending'])]),
+        invited_by: Object.fromEntries(invited.map((id) => [id, me])),
+        seeds: null,
+        groups: null,
+        decisions: {},
+        nudges: {},
+        started_at: '',
+      };
+      // Names and avatars, so everyone sees the whole tournament (they're not all friends with each other)
+      t.people = Object.fromEntries((await usersByIds(f, t.players)).map((u) => [u.id, profileOf(u)]));
+      const docRef = f.doc(f.collection(f.db, 'tournaments'));
+      await f.setDoc(docRef, t);
+      notify(f, 'tournament', docRef.id);
+      return { id: docRef.id, ...t };
+    });
+  }
+
+  /** The host changes the name or rules before it starts. */
+  async function updateTournament(token, id, patch = {}) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBeHost(t, me);
+      mustBe(t, 'inviting');
+      const title = patch.name != null ? cleanName(patch.name) : t.name;
+      if (!title) throw new ApiError('Give the tournament a name (up to 40 characters).', 'invalid');
+      await f.updateDoc(ref(f, 'tournaments', id), { name: title, ...cleanSettings({ ...t, ...patch }) });
+      return {};
+    });
+  }
+
+  /** Anyone who has joined invites their own friends (before it starts); the host needn't know them. */
+  async function inviteToTournament(token, id, players) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBe(t, 'inviting');
+      if (t.answers?.[me] !== 'accepted') throw new ApiError('Join the tournament first, then invite your friends.', 'invalid');
+      const friendIds = await friendIdsOf(f, me);
+      const fresh = [...new Set(players || [])].filter((p) => p && !t.players.includes(p));
+      if (fresh.some((p) => !friendIds.includes(p))) throw new ApiError('You can only invite your friends.', 'invalid');
+      if (!fresh.length) return {};
+      if (t.players.length + fresh.length > MAX_PLAYERS) throw new ApiError(`A tournament can have up to ${MAX_PLAYERS} players.`, 'invalid');
+      const patch = { players: f.arrayUnion(...fresh) };
+      for (const u of await usersByIds(f, fresh)) {
+        patch[`answers.${u.id}`] = 'pending';
+        patch[`invited_by.${u.id}`] = me;
+        patch[`people.${u.id}`] = profileOf(u);
+      }
+      await f.updateDoc(ref(f, 'tournaments', id), patch);
+      notify(f, 'tournament', id);
+      return {};
+    });
+  }
+
+  /** Join or decline (or leave, before it starts). The last answer starts an auto-start tournament. */
+  async function respondTournament(token, id, accept) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBe(t, 'inviting');
+      if (t.creator === me) throw new ApiError('You’re the host. Cancel the tournament instead.', 'invalid');
+      await f.updateDoc(ref(f, 'tournaments', id), { [`answers.${me}`]: accept ? 'accepted' : 'declined' });
+      const after = { ...t, answers: { ...t.answers, [me]: accept ? 'accepted' : 'declined' } };
+      if (after.auto_start && allAnswered(after) && accepted(after).length >= MIN_PLAYERS) await startNow(f, after).catch(() => {});
+      return {};
+    });
+  }
+
+  /**
+   * Leave a tournament. Before it starts you're just out; once it's started your opponent wins your
+   * series by forfeit. Either way it's gone from your list. (The host cancels it before the start.)
+   */
+  async function quitTournament(token, id) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      if (t.status === 'inviting') {
+        if (t.creator === me) throw new ApiError('You’re the host. Cancel the tournament instead.', 'invalid');
+        await f.updateDoc(ref(f, 'tournaments', id), { [`answers.${me}`]: 'declined' });
+        return {};
+      }
+      if (t.status !== 'live' || t.answers?.[me] !== 'accepted') return {};
+      const patch = { [`answers.${me}`]: 'left', [`left.${me}`]: now() };
+      const next = nextHost(t, me);
+      if (next) patch.host = next; // the host quit: the next player still in runs it
+      await f.updateDoc(ref(f, 'tournaments', id), patch);
+      return {};
+    });
+  }
+
+  /** Every game of these players (for seeding and the seed preview). */
+  async function gamesOfPlayers(f, ids) {
+    const games = (await Promise.all(ids.map((id) => where(f, 'games', 'players', 'array-contains', id)))).flat();
+    return [...new Map(games.map((g) => [g.id, g])).values()];
+  }
+
+  /** Draws (or takes the host's) bracket or groups; the tournament goes live. */
+  async function startNow(f, t, layout = null) {
+    const players = accepted(t);
+    let chosen = layout;
+    if (chosen) {
+      const problem = checkLayout(t, chosen, players);
+      if (problem) throw new ApiError(problem, 'invalid');
+    } else {
+      chosen = drawFor(t, players, t.draw === 'seeded' ? await gamesOfPlayers(f, players) : []);
+    }
+    await f.updateDoc(ref(f, 'tournaments', t.id), { status: 'live', ...storedLayout(chosen), started_at: now() });
+    notify(f, 'tournament-start', t.id);
+  }
+
+  /** The host starts it now, with whoever has joined (`layout`: what they set up, for custom). */
+  async function startTournament(token, id, layout = null) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBeHost(t, me);
+      mustBe(t, 'inviting');
+      if (accepted(t).length < MIN_PLAYERS) throw new ApiError(`At least ${MIN_PLAYERS} players need to join first.`, 'invalid');
+      if (t.draw === 'custom' && !layout) throw new ApiError('Set up the bracket first.', 'invalid');
+      await startNow(f, t, t.draw === 'custom' ? layout : null);
+      return {};
+    });
+  }
+
+  async function cancelTournament(token, id) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBeHost(t, me);
+      if (t.status === 'cancelled') return {};
+      await f.updateDoc(ref(f, 'tournaments', id), { status: 'cancelled', cancelled_at: now() });
+      return {};
+    });
+  }
+
+  /** The host decides a series (a walkover, or settling one stuck past its deadline); null undoes it. */
+  async function decideSeries(token, id, key, winner) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBeHost(t, me);
+      mustBe(t, 'live');
+      if (!/^\d+-\d+$/.test(String(key))) throw new ApiError('Unknown series.', 'invalid');
+      await f.updateDoc(ref(f, 'tournaments', id), { [`decisions.${key}`]: winner ? { winner, at: now() } : f.deleteField() });
+      return {};
+    });
+  }
+
+  /** The host puts one of their friends in a player's place (someone who dropped out). */
+  async function replacePlayer(token, id, oldId, newId) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBeHost(t, me);
+      mustBe(t, 'live');
+      const placed = t.seeds || (t.groups || []).flatMap(groupIds);
+      if (!placed.includes(oldId)) throw new ApiError('That player isn’t in the bracket.', 'invalid');
+      if (placed.includes(newId)) throw new ApiError('They’re already in it.', 'invalid');
+      if (!(await friendIdsOf(f, me)).includes(newId)) throw new ApiError('You can only bring in your friends.', 'invalid');
+      const [u] = await usersByIds(f, [newId]);
+      const swap = (x) => (x === oldId ? newId : x);
+      const patch = {
+        players: f.arrayUnion(newId),
+        [`answers.${newId}`]: 'accepted',
+        [`invited_by.${newId}`]: me,
+        [`people.${newId}`]: profileOf(u),
+        [`replaced.${oldId}`]: newId,
+      };
+      if (t.seeds) patch.seeds = t.seeds.map(swap);
+      else patch.groups = t.groups.map((g) => ({ ids: groupIds(g).map(swap) }));
+      await f.updateDoc(ref(f, 'tournaments', id), patch);
+      return {};
+    });
+  }
+
+  /** "Ready to play?": lets your opponent know (once an hour at most). */
+  async function nudge(token, id, toId) {
+    return run(async (f) => {
+      const me = meOf(f);
+      const t = await tournamentDoc(f, id);
+      mustBe(t, 'live');
+      if (!t.players.includes(me) || !t.players.includes(toId)) throw new ApiError('You’re not both in this tournament.', 'invalid');
+      const last = t.nudges?.[toId];
+      if (last?.from === me && Date.now() - Date.parse(last.at) < 3600000) throw new ApiError('You nudged them less than an hour ago.', 'invalid');
+      await f.updateDoc(ref(f, 'tournaments', id), { [`nudges.${toId}`]: { from: me, at: now() } });
+      notify(f, 'tournament-nudge', `${id}:${toId}`);
+      return {};
+    });
+  }
+
+  /** Writes a finished tournament's trophy (anyone in it can; the first one counts). */
+  async function recordTrophy(token, t, winner) {
+    return run(async (f) => {
+      const docRef = ref(f, 'trophies', t.id);
+      if ((await f.getDoc(docRef)).exists()) return {};
+      const players = (t.seeds || (t.groups || []).flatMap(groupIds)).filter(Boolean);
+      await f.setDoc(docRef, { winner, name: t.name, sport: t.sport, date: now().slice(0, 10), players });
+      return {};
+    });
+  }
+
+  /** Win rates for the seed preview: { id: { played, pct } } in this game. */
+  async function playerRecords(token, ids, sport) {
+    return run(async (f) => {
+      const games = await gamesOfPlayers(f, ids);
+      return Object.fromEntries(ids.map((id) => [id, recordOf(id, games, sport)]));
     });
   }
 
@@ -1012,6 +1319,8 @@ export function createFirebaseBackend(ApiError) {
 
   return {
     onRemoteChange, pushStatus, enablePush, disablePush, refreshPush, pinLength,
+    createTournament, updateTournament, inviteToTournament, respondTournament, startTournament, cancelTournament, quitTournament,
+    decideSeries, replacePlayer, nudge, recordTrophy, playerRecords,
     adminLoad, adminSaveGame, adminDeleteGame, adminSetFriends, adminHistory, adminResetPin, adminSuspend, adminAnnounce, adminAnnouncements, adminRemoveAnnouncement,
     signUp, signIn, signOut, bootstrap, getMe, getFriends, searchUsers, updateProfile, changePin,
     addFriend, removeFriend, blockUser, unblockUser, getBlocked, getProfile, getGames,

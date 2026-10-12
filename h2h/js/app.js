@@ -5,8 +5,9 @@ import { isDemo, isFirebase, demoControls } from './api.js';
 import { views, computeStats, record, recentTeams, timeline, teamRecords, clutch, activityByDay, opponentRecords, sportOf, CLUTCH_TESTS, CLOSE_MARGIN, BLOWOUT_MARGIN } from './stats.js';
 import { renderTrendCard, renderMonthCalendar, METRICS, RANGES } from './chart.js';
 import { showLock, isLocked, avatar, AVATARS, changePinFlow, confirmPinFlow } from './lock.js';
-import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion } from './ui.js';
+import { icon, logo, esc, haptic, openSheet, openPopup, alertDialog, toast, animateNumbers, formatNumber, reducedMotion, closeAllModals } from './ui.js';
 import { startAdmin, stopAdmin } from './admin.js';
+import { initTournaments, renderList as renderTourList, openCreateTournament, renderPage as renderTourPage, onPageClick as onTourPageClick, openSeries, respond as respondTournament, updates as tournamentUpdates } from './tournaments-ui.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -97,8 +98,18 @@ function show(screen, sub) {
     else el.removeAttribute('aria-current');
   }
   document.title = `${{ dashboard: 'Dashboard', history: 'History', friends: 'Friends', settings: 'Settings' }[screen]} · Dubs`;
-  if (screen === 'friends') showProfilePage(sub === undefined ? fp.userId : sub);
-  const target = screen === 'friends' && fp.userId ? `friends/${fp.userId}` : screen;
+  if (screen === 'friends') {
+    // The Friends tab's pages: a friend's profile (#friends/<id>) or a tournament (#friends/t-<id>)
+    const page = sub === undefined ? (tp.id === LIST ? 'tournaments' : tp.id ? `t-${tp.id}` : fp.userId) : sub;
+    if (page === 'tournaments' || (page && String(page).startsWith('t-'))) {
+      showProfilePage(null);
+      showTournamentPage(page === 'tournaments' ? LIST : String(page).slice(2));
+    } else {
+      showTournamentPage(null);
+      showProfilePage(page);
+    }
+  }
+  const target = screen === 'friends' && tp.id ? (tp.id === LIST ? 'friends/tournaments' : `friends/t-${tp.id}`) : screen === 'friends' && fp.userId ? `friends/${fp.userId}` : screen;
   if (location.hash.slice(1) !== target) history.replaceState(history.state, '', `#${target}`);
   return same;
 }
@@ -107,8 +118,8 @@ document.addEventListener('click', (e) => {
   const nav = e.target.closest('[data-nav]');
   if (nav) {
     e.preventDefault();
-    // Tapping Friends while a profile is open goes back to the list, like iOS
-    if (nav.dataset.nav === 'friends' && ui.screen === 'friends' && fp.userId) {
+    // Tapping Friends while a profile or tournament is open goes back to the list, like iOS
+    if (nav.dataset.nav === 'friends' && ui.screen === 'friends' && (fp.userId || tp.id)) {
       haptic('light');
       return closeProfile();
     }
@@ -136,6 +147,9 @@ document.addEventListener('click', (e) => {
   else if (name === 'open-profile') openProfile(id);
   else if (name === 'invite') shareInvite();
   else if (name === 'notifications') openNotifications();
+  else if (name === 'tournament') openTournamentPage(id);
+  else if (name === 'tournaments') openTournamentList();
+  else if (name === 'new-tournament') openCreateTournament();
 });
 
 // "N" logs a new game on desktop keyboards
@@ -1212,10 +1226,13 @@ function teamTile(side, abbr, opponentName = oppName()) {
   </button>`;
 }
 
-/** `id` edits an existing game; otherwise a new game pre-filled with the last matchup. */
-function openGameSheet({ id = null } = {}) {
+/**
+ * `id` edits an existing game; otherwise a new game pre-filled with the last matchup.
+ * From a tournament bracket: `opponent` (who may not be your friend) and `tournament` are given.
+ */
+function openGameSheet({ id = null, opponent: forced = null, tournament = null } = {}) {
   if (document.documentElement.classList.contains('has-modal') || !state.session || isLocked()) return;
-  if (!store.rival()) {
+  if (!forced && !store.rival()) {
     toast('Add a friend first, then log your games against them.');
     show('friends');
     return;
@@ -1227,15 +1244,15 @@ function openGameSheet({ id = null } = {}) {
   // Who the game is against: fixed when editing; for a new game it starts as the current rivalry
   // and can be switched by tapping the opponent's name.
   const otherId = editing ? (source.player1_id === meId() ? source.player2_id : source.player1_id) : everyone() ? store.lastOpponent() : state.rivalId;
-  let opponent = state.friends.find((f) => f.id === otherId) || state.friends[0];
-  // The sport is fixed when editing; a new game is logged in the current game mode
-  const sport = editing ? sportOf(source) : state.mode;
+  let opponent = forced || state.friends.find((f) => f.id === otherId) || state.friends[0];
+  // The sport is fixed when editing; a new game is logged in the current game mode (or the tournament's)
+  const sport = editing ? sportOf(source) : tournament ? tournament.sport : state.mode;
   const fifa = sport === 'fifa';
   const draft = editing
     ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note, myPens: view.myPens ?? '', oppPens: view.oppPens ?? '' }
     : { date: todayISO(), myTeam: null, oppTeam: null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' }; // new games start with both teams empty
   const opp = opponent.display_name;
-  const canSwitch = !editing && state.friends.length > 1;
+  const canSwitch = !editing && !forced && state.friends.length > 1;
   // Editing a saved game sends a request; a game that hasn't synced yet is still yours to change
   const needsApproval = editing && !store.isLocalOnly(source.id);
   const openReq = editing ? store.pendingRequestFor(source.id) : null;
@@ -1284,6 +1301,7 @@ function openGameSheet({ id = null } = {}) {
             : ''
         }
         <li class="cell"><label for="g-note" class="visually-hidden">Note</label><input id="g-note" name="note" class="cell__input cell__input--full" placeholder="Note (optional)" maxlength="80" value="${esc(draft.note)}" enterkeyhint="done"></li>
+        ${editing ? '' : '<li class="cell tour-counts" data-series hidden></li>'}
       </ul>
 
       <button type="submit" class="btn btn--primary btn--block" data-sheet="save" disabled>${needsApproval ? `Send to ${esc(opp)} for Approval` : editing ? 'Save Changes' : 'Save Game'}</button>
@@ -1306,6 +1324,22 @@ function openGameSheet({ id = null } = {}) {
   });
 
   const pensRow = $('[data-pens]', content);
+  // A tournament series against this opponent: "Counts for Summer Cup · Semifinals · Game 3"
+  const seriesRow = $('[data-series]', content);
+  let series = [];
+  const paintSeries = () => {
+    if (!seriesRow) return;
+    series = openSeries(opponent.id, sport);
+    if (tournament) series.sort((x, y) => (x.t.id === tournament.id ? -1 : y.t.id === tournament.id ? 1 : 0));
+    seriesRow.hidden = !series.length;
+    seriesRow.innerHTML = series.length
+      ? `<label for="g-series" class="tour-counts__label"><span aria-hidden="true">🏆</span> Counts for
+          ${series.length > 1 ? `<select id="g-series-pick" name="seriesPick">${series.map((x, i) => `<option value="${i}">${esc(x.label)}</option>`).join('')}</select>` : `<strong>${esc(series[0].label)}</strong>`}</label>
+        <input type="checkbox" role="switch" class="switch" id="g-series" name="counts" checked>`
+      : '';
+  };
+  paintSeries();
+  const chosenSeries = () => (seriesRow && !seriesRow.hidden && form.counts?.checked ? series[Number(form.seriesPick?.value || 0)] : null);
   const validate = () => {
     const d = read();
     const filled = d.myScore !== '' && d.oppScore !== '';
@@ -1315,8 +1349,12 @@ function openGameSheet({ id = null } = {}) {
     if (pensRow) pensRow.hidden = !shootoutOpen;
     const pens = shootoutOpen && (d.myPens !== '' || d.oppPens !== '');
     const pensBad = pens && (d.myPens === '' || d.oppPens === '' || +d.myPens === +d.oppPens);
-    const ok = filled && (fifa || !tie) && !pensBad && d.myTeam && d.oppTeam && d.date;
-    hint.textContent = !fifa && tie
+    // A tournament game needs a winner: a level FIFA game only counts with a shootout
+    const seriesDraw = Boolean(chosenSeries()) && fifa && tie && !(shootoutOpen && pens && !pensBad);
+    const ok = filled && (fifa || !tie) && !pensBad && !seriesDraw && d.myTeam && d.oppTeam && d.date;
+    hint.textContent = seriesDraw
+      ? 'A tournament game needs a winner. Turn on Extra Time and add the shootout, or switch off “Counts for”.'
+      : !fifa && tie
       ? 'Basketball has no ties. Someone has to win.'
       : pensBad
         ? 'Enter both penalty scores. A shootout needs a winner.'
@@ -1351,6 +1389,7 @@ function openGameSheet({ id = null } = {}) {
       $('[data-opp-name]', oppBtn).textContent = chosen.display_name;
       oppBtn.setAttribute('aria-label', `Playing against ${chosen.display_name}. Change opponent`);
       form.oppScore.setAttribute('aria-label', `${chosen.display_name}’s score`);
+      paintSeries();
       for (const side of ['myTeam', 'oppTeam']) $(`[data-slot="${side}"]`, content).innerHTML = teamTile(side, draft[side], chosen.display_name);
       const tile = $('[data-slot="oppTeam"] .team-tile', content);
       tile.classList.add('is-popping');
@@ -1434,10 +1473,17 @@ function openGameSheet({ id = null } = {}) {
       toast(`Sent to ${opponent.display_name} for approval`);
       return;
     }
+    const counted = chosenSeries();
+    if (counted) {
+      neutral.tournament_id = counted.t.id;
+      if (counted.stage === 'group') neutral.tournament_stage = 'group'; // counts in the group table
+    }
     if (editing) store.updateGame({ ...neutral, id: source.id });
     else {
       store.addGame(neutral);
-      if (!everyone() && opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged
+      const isFriend = state.friends.some((f) => f.id === opponent.id);
+      if (isFriend && !everyone() && opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged
+      if (counted) toast(`Counted for ${counted.t.name}`);
     }
     haptic('success');
     sheet.close();
@@ -1482,6 +1528,87 @@ function openProfile(userId) {
   history.pushState({ profile: true }, '', `#friends/${userId}`);
   show('friends', userId);
   haptic('light');
+}
+
+// ---------- tournament page (inside the Friends tab) ----------
+
+// The 🏆 button opens the Tournaments page (#friends/tournaments); a tournament opens on top of it
+// (#friends/t-<id>), and its back button returns to the list.
+const LIST = 'list';
+const tp = { id: null, listScroll: 0 };
+
+async function openTournamentList() {
+  await closeAllModals();
+  if (tp.id === LIST) return;
+  history.pushState({ profile: true }, '', '#friends/tournaments');
+  show('friends', 'tournaments');
+  haptic('light');
+}
+
+async function openTournamentPage(id) {
+  if (!state.tournaments.some((t) => t.id === id)) return;
+  await closeAllModals(); // e.g. opened from the Notifications page
+  if (tp.id !== LIST) {
+    // Make the Tournaments list the page you go back to
+    history.pushState({ profile: true }, '', '#friends/tournaments');
+    show('friends', 'tournaments');
+  }
+  history.pushState({ profile: true, tournament: true }, '', `#friends/t-${id}`);
+  show('friends', `t-${id}`);
+  haptic('light');
+}
+
+/** Shows the Tournaments page (LIST) or tournament `id` in the Friends tab; null hides them. */
+function showTournamentPage(id) {
+  const screen = $('.screen[data-screen="friends"]');
+  const scroller = $('.scroller', screen);
+  const page = $('#tour-page');
+  if (!id || (id !== LIST && !state.tournaments.some((t) => t.id === id))) {
+    if (!tp.id) return;
+    tp.id = null;
+    page.hidden = true;
+    page.innerHTML = '';
+    screen.classList.remove('is-subpage');
+    $('#friends-content').hidden = false;
+    $('#friends-navtitle').textContent = 'Friends';
+    setBackLabel('Friends');
+    scroller.scrollTop = tp.listScroll;
+    return;
+  }
+  if (tp.id === id) return paintTournamentPage();
+  if (!tp.id) tp.listScroll = scroller.scrollTop;
+  tp.id = id;
+  screen.classList.add('is-subpage');
+  $('#friends-content').hidden = true;
+  page.hidden = false;
+  scroller.scrollTop = 0;
+  paintTournamentPage();
+}
+
+function setBackLabel(text) {
+  const back = $('#friend-back');
+  back.lastChild.textContent = text;
+  back.setAttribute('aria-label', `Back to ${text}`);
+}
+
+function paintTournamentPage() {
+  if (!tp.id) return;
+  const page = $('#tour-page');
+  const scroller = $('.screen[data-screen="friends"] .scroller');
+  const keep = scroller.scrollTop;
+  if (tp.id === LIST) {
+    renderTourList(page);
+    $('#friends-navtitle').textContent = 'Tournaments';
+    setBackLabel('Friends');
+    document.title = 'Tournaments · Dubs';
+  } else {
+    const t = renderTourPage(page, tp.id);
+    $('#friends-navtitle').textContent = t?.name || 'Tournament';
+    setBackLabel('Tournaments');
+    document.title = `${t?.name || 'Tournament'} · Dubs`;
+  }
+  page.classList.toggle('tour-page--list', tp.id === LIST);
+  scroller.scrollTop = keep;
 }
 
 function closeProfile() {
@@ -1537,7 +1664,11 @@ function paintProfile() {
   const page = $('#friend-page');
   const isMe = fp.userId === meId();
   const friend = isMe ? state.me : state.friends.find((f) => f.id === fp.userId);
-  const head = `<div class="profile__head">${avatar(friend, 'xl')}<h2 class="profile__name">${esc(friend.display_name)}</h2><p class="profile__user">@${esc(friend.username)}</p></div>`;
+  const won = store.trophiesOf(fp.userId);
+  const cabinet = won.length
+    ? `<button type="button" class="trophy-cabinet" data-fp-trophies>🏆 ${won.length} tournament ${won.length === 1 ? 'win' : 'wins'}</button>`
+    : '';
+  const head = `<div class="profile__head">${avatar(friend, 'xl')}<h2 class="profile__name">${esc(friend.display_name)}</h2><p class="profile__user">@${esc(friend.username)}</p>${cabinet}</div>`;
   if (!fp.data) {
     page.innerHTML = `<div class="fpage">${head}${
       fp.error
@@ -1695,9 +1826,19 @@ function paintProfile() {
 function initProfilePage() {
   $('#friend-back').addEventListener('click', () => {
     haptic('light');
+    if (tp.id && tp.id !== LIST && !history.state?.tournament) return show('friends', 'tournaments'); // opened from a link
     closeProfile();
   });
   $('#friend-page').addEventListener('click', (e) => {
+    if (e.target.closest('[data-fp-trophies]')) {
+      const won = store.trophiesOf(fp.userId).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      openPopup({
+        title: 'Tournament Wins',
+        subtitle: fp.userId === meId() ? 'Yours' : state.friends.find((f) => f.id === fp.userId)?.display_name || '',
+        body: `<ul class="admin-log" role="list">${won.map((x) => `<li><span class="admin-log__when">${esc(x.date ? fmt(x.date, { month: 'short', day: 'numeric', year: 'numeric' }) : '')} · ${x.sport === 'fifa' ? 'FIFA' : 'NBA 2K'}</span><strong>🏆 ${esc(x.name)}</strong></li>`).join('')}</ul>`,
+      });
+      return;
+    }
     const selBtn = e.target.closest('[data-fp-sel]');
     if (selBtn) {
       const id = selBtn.dataset.fpSel || null;
@@ -1967,8 +2108,14 @@ function openClubPicker(side, current, opponent) {
 
 // ---------- notifications (edit / delete requests) ----------
 
+/** Tournament updates you haven't seen yet (they're worked out from the tournaments, not stored). */
+const unseenUpdates = () => {
+  const seen = store.notificationsSeenAt();
+  return tournamentUpdates().filter((u) => u.at > seen).length;
+};
+
 function renderBell() {
-  const { badge } = store.notifications();
+  const badge = store.notifications().badge + unseenUpdates();
   $$('[data-bell-badge]').forEach((b) => {
     b.hidden = !badge;
     b.textContent = badge > 9 ? '9+' : String(badge);
@@ -2036,8 +2183,26 @@ function openNotifications() {
         ${a.body ? `<p class="notif-card__body">${esc(a.body)}</p>` : ''}
         <span class="notif-card__time">${esc(relativeTime(a.created_at))}</span>
       </article>`).join('');
+    const invites = n.invites.map((t) => `
+      <article class="card notif-card">
+        <p class="notif-card__text"><span aria-hidden="true">🏆 </span><strong>${esc(t.people?.[t.invited_by?.[meId()] || t.creator]?.display_name || 'A friend')}</strong> invited you to <strong>${esc(t.name)}</strong></p>
+        <p class="notif-card__body">${MODE_NAMES[t.sport]} · ${t.players.length} players invited</p>
+        <div class="notif-card__actions">
+          <button type="button" class="btn btn--tinted" data-tour-answer="${esc(t.id)}" data-yes="0">Decline</button>
+          <button type="button" class="btn btn--primary" data-tour-answer="${esc(t.id)}" data-yes="1">Join</button>
+        </div>
+      </article>`).join('');
+    const ups = tournamentUpdates()
+      .slice(0, 12)
+      .map((u) => `<button type="button" class="card notif-card notif-card--update" data-action="tournament" data-id="${esc(u.t.id)}">
+        <span class="notif-card__text"><span aria-hidden="true">${u.icon} </span>${esc(u.text)}</span>
+        <span class="notif-card__time">${esc(relativeTime(u.at))}</span>
+      </button>`)
+      .join('');
     body.innerHTML =
       pushCard +
+      section('Tournament Invites', invites) +
+      section('Tournament Updates', ups) +
       section('From Dubs', news) +
       section('Needs Your Approval', incoming) + section('Waiting on Friends', outgoing) + section('Recent', answered) ||
       `<p class="notif-empty">No notifications.<br>When a friend asks to edit or delete a game, it shows up here for you to approve.</p>`;
@@ -2051,6 +2216,12 @@ function openNotifications() {
   content.addEventListener('click', async (e) => {
     if (e.target.closest('[data-sheet="done"]')) return sheet.close();
     if (e.target.closest('[data-push-on]')) return setPush(true).then(paint);
+    const tourAnswer = e.target.closest('[data-tour-answer]');
+    if (tourAnswer) {
+      tourAnswer.disabled = true;
+      await respondTournament(tourAnswer.dataset.tourAnswer, tourAnswer.dataset.yes === '1');
+      return paint();
+    }
     const respond = e.target.closest('[data-respond]');
     const cancel = e.target.closest('[data-cancel-req]');
     const btn = respond || cancel;
@@ -2105,7 +2276,7 @@ function friendRow(f, { chevron = true, more = false, action = 'open-rival' } = 
   const verb = action === 'open-profile' ? 'Open profile' : 'Open rivalry';
   return `<li class="friend-item"><button type="button" class="cell cell--button friend-row" data-action="${action}" data-id="${esc(f.id)}" aria-label="${esc(f.display_name)}, @${esc(f.username)}. Your record ${recLabel(r)}.${current ? ' Current rivalry.' : ''} ${verb}">
     ${avatar(f, 'md')}
-    <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}</span><span class="cell__sub">@${esc(f.username)}</span></span>
+    <span class="cell__stack"><span class="cell__title">${esc(f.display_name)}${store.trophiesOf(f.id).length ? ` <span class="trophy-badge" aria-label="${store.trophiesOf(f.id).length} tournament wins">🏆${store.trophiesOf(f.id).length > 1 ? store.trophiesOf(f.id).length : ''}</span>` : ''}</span><span class="cell__sub">@${esc(f.username)}</span></span>
     <span class="friend-row__record ${gamesIn(r) ? (r.wins >= r.losses ? 'is-win' : 'is-loss') : ''}">${gamesIn(r) ? wl(r) : 'New'}</span>
     ${current && action === 'open-rival' ? icon('check', 'friend-row__check') : chevron && !more ? '<svg class="icon cell__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.75 6.25 6.25-6.25 6.25"/></svg>' : ''}
   </button>${more ? `<button type="button" class="friend-more" data-action="friend-options" data-id="${esc(f.id)}" aria-label="More options for ${esc(f.display_name)}">${icon('more')}</button>` : ''}</li>`;
@@ -2373,12 +2544,13 @@ function render(detail = {}) {
   ui.stats = computeStats(pair, meId());
   renderSync();
   renderBell();
-  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode, state.requests]);
+  const sig = JSON.stringify([state.loaded || state.status, state.games, state.friends, state.me, state.rivalId, meId(), state.mode, state.requests, state.tournaments, state.tournamentGames]);
   if (sig !== ui.signature) {
     ui.signature = sig;
     renderDashboard();
     renderHistory();
     renderFriends();
+    paintTournamentPage();
     renderSidebarProfile();
   }
   // Don't rebuild Settings under the user's finger unless sync state changed
@@ -2466,6 +2638,8 @@ function registerServiceWorker() {
 
 async function init() {
   registerServiceWorker(); // before any await: the lock screen can wait indefinitely
+  initTournaments({ openPage: (id) => openTournamentPage(id), openList: () => show('friends', 'tournaments'), logGame: (opponent, tournament) => openGameSheet({ opponent, tournament }), repaint: () => paintTournamentPage() });
+  $('#tour-page').addEventListener('click', (e) => onTourPageClick(e, $('#tour-page')));
   initNavBars();
   initSwipe();
   initSettings();

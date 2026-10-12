@@ -19,6 +19,9 @@ rules_version = '2';
 //   suspensions/{userId}   { at }                          suspended accounts (written by the Apps Script)
 //   adminLog/{id}          { at, action, summary, … }       the admin's private history
 //   config/adminPin        { length, updated_at }           public: the admin signs in with 8 digits
+//   tournaments/{tid}      { name, creator, host?, status, players, answers, invited_by, people, rules…,
+//                            seeds | groups, decisions, nudges, left, replaced, … }  (see tournament.js)
+//   trophies/{tid}         { winner, name, sport, date, players }  a finished tournament's champion
 //
 // The admin (one fixed account, see isAdmin) can change any game and friendship directly.
 service cloud.firestore {
@@ -131,7 +134,8 @@ service cloud.firestore {
             || (isAdmin() && request.resource.data.created_by in request.resource.data.players))
         && request.resource.data.deleted == false
         && request.resource.data.last_request == ''
-        && friends(request.resource.data.player1_id, request.resource.data.player2_id);
+        && (friends(request.resource.data.player1_id, request.resource.data.player2_id)
+            || tournamentGame(request.resource.data));
 
       // A saved game only changes when the other player approves a request, in the same batch
       // as the approval (see requests below) — or is hidden when one of its players deletes their account.
@@ -142,7 +146,8 @@ service cloud.firestore {
     function validGame(g, gid) {
       return g.keys().hasOnly(['id', 'date', 'player1_id', 'player2_id', 'player1_score', 'player2_score',
                                'player1_team', 'player2_team', 'overtime', 'note', 'created_by', 'created_at',
-                               'updated_at', 'deleted', 'sport', 'player1_pens', 'player2_pens', 'players', 'last_request'])
+                               'updated_at', 'deleted', 'sport', 'player1_pens', 'player2_pens', 'players', 'last_request',
+                               'tournament_id', 'tournament_stage'])
         && g.id == gid
         && g.date is string && g.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
         && g.player1_id is string && g.player2_id is string && g.player1_id != g.player2_id
@@ -155,7 +160,16 @@ service cloud.firestore {
         && g.overtime is bool && g.note is string && g.note.size() <= 120
         && (g.player1_pens == '' || g.player1_pens is int)
         && (g.player2_pens == '' || g.player2_pens is int)
-        && g.deleted is bool;
+        && g.deleted is bool
+        && (!('tournament_id' in g) || g.tournament_id is string)
+        && (!('tournament_stage' in g) || g.tournament_stage == 'group');
+    }
+
+    /** Two players in the same live tournament can log games for it without being friends. */
+    function tournamentGame(g) {
+      let t = get(path('tournaments', g.tournament_id)).data;
+      return 'tournament_id' in g && t.status == 'live' && t.sport == g.sport
+        && t.answers.get(g.player1_id, '') == 'accepted' && t.answers.get(g.player2_id, '') == 'accepted';
     }
 
     function applyingApprovedRequest(gid) {
@@ -228,6 +242,122 @@ service cloud.firestore {
       allow get: if true;
       allow list: if false;
       allow write: if isAdmin();
+    }
+
+    // ---------- tournaments ----------
+    // Everyone in a tournament (invited, playing, or gone) can read it. Each change is one kind of
+    // move: join/decline, invite, quit, nudge, or one of the host's (edit, start, decide, replace,
+    // cancel). Whoever answers last may also start an auto-start one.
+
+    match /tournaments/{tid} {
+      allow read: if member() && (me() in resource.data.players || isAdmin());
+      allow create: if member() && validTournamentCreate(request.resource.data);
+      allow update: if member() && me() in resource.data.players && (
+        answering() || inviting() || quitting() || nudging()
+        || (me() == hostId(resource.data) && (editingRules() || starting() || deciding() || replacing() || cancelling()))
+        || (autoStarting() && starting())
+      );
+      allow delete: if false;
+    }
+
+    function hostId(t) { return t.get('host', t.creator); }
+    function answerOf(t, id) { return t.answers.get(id, ''); }
+    /** Only `keys` of the map `field` changed. */
+    function mapChanged(field, keys) {
+      return request.resource.data.get(field, {}).diff(resource.data.get(field, {})).affectedKeys().hasOnly(keys);
+    }
+    function tournamentStatus(s) { return resource.data.status == s && request.resource.data.status == s; }
+    function settingsKeys() { return ['name', 'sport', 'format', 'group_games', 'best_of', 'draw', 'auto_start', 'deadline_days']; }
+
+    function validTournamentCreate(t) {
+      return t.keys().hasOnly(settingsKeys().concat(['creator', 'created_at', 'status', 'players', 'answers', 'invited_by',
+                                                     'seeds', 'groups', 'decisions', 'nudges', 'started_at', 'people']))
+        && t.name is string && t.name.size() > 0 && t.name.size() <= 40
+        && t.sport in ['2k', 'fifa'] && t.format in ['knockout', 'groups'] && t.draw in ['random', 'seeded', 'custom']
+        && t.creator == me() && t.status == 'inviting'
+        && t.players is list && t.players.size() >= 3 && t.players.size() <= 16 && t.players[0] == me()
+        && t.players.toSet().size() == t.players.size()
+        && t.answers is map && t.answers.keys().hasAll(t.players) && t.answers.size() == t.players.size()
+        && t.answers[me()] == 'accepted'
+        && t.seeds == null && t.groups == null && t.started_at == '';
+    }
+
+    // Join or decline before it starts (the host is always in)
+    function answering() {
+      return tournamentStatus('inviting') && me() != resource.data.creator
+        && answerOf(resource.data, me()) in ['pending', 'accepted']
+        && request.resource.data.answers[me()] in ['accepted', 'declined']
+        && onlyChanged(['answers']) && mapChanged('answers', [me()]);
+    }
+
+    // Someone who joined invites their own friends: new players come in as "pending"
+    function inviting() {
+      let after = request.resource.data.players;
+      let added = after.toSet().difference(resource.data.players.toSet());
+      let answered = request.resource.data.answers.diff(resource.data.answers).affectedKeys();
+      return tournamentStatus('inviting') && answerOf(resource.data, me()) == 'accepted'
+        && after.hasAll(resource.data.players) && after.size() <= 16 && added.size() > 0
+        && onlyChanged(['players', 'answers', 'invited_by', 'people'])
+        && answered.difference(added).size() == 0 && added.difference(answered).size() == 0;
+    }
+
+    // Quit once it's started: you're marked as gone (your opponents win by forfeit). The host hands it on.
+    function quitting() {
+      let next = request.resource.data.get('host', resource.data.get('host', resource.data.creator));
+      return tournamentStatus('live') && answerOf(resource.data, me()) == 'accepted'
+        && request.resource.data.answers[me()] == 'left' && request.resource.data.left[me()] is string
+        && onlyChanged(['answers', 'left', 'host']) && mapChanged('answers', [me()]) && mapChanged('left', [me()])
+        && (hostId(resource.data) == me()
+              ? next != me() && answerOf(resource.data, next) == 'accepted'
+              : request.resource.data.get('host', null) == resource.data.get('host', null));
+    }
+
+    // "Ready to play?" (one opponent at a time)
+    function nudging() {
+      let changed = request.resource.data.nudges.diff(resource.data.get('nudges', {})).affectedKeys();
+      return tournamentStatus('live') && answerOf(resource.data, me()) == 'accepted'
+        && onlyChanged(['nudges']) && changed.size() == 1 && changed.hasOnly(resource.data.players);
+    }
+
+    // ----- the host -----
+    function editingRules() {
+      return tournamentStatus('inviting') && onlyChanged(settingsKeys())
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
+        && request.resource.data.sport in ['2k', 'fifa'] && request.resource.data.format in ['knockout', 'groups']
+        && request.resource.data.draw in ['random', 'seeded', 'custom'];
+    }
+    function starting() {
+      return resource.data.status == 'inviting' && request.resource.data.status == 'live'
+        && onlyChanged(['status', 'seeds', 'groups', 'started_at'])
+        && (request.resource.data.seeds is list || request.resource.data.groups is list);
+    }
+    /** The last player to answer starts an auto-start tournament once nobody is left to answer. */
+    function autoStarting() {
+      return resource.data.auto_start == true && answerOf(resource.data, me()) in ['accepted', 'declined']
+        && !('pending' in resource.data.answers.values());
+    }
+    function deciding() { return tournamentStatus('live') && onlyChanged(['decisions']); }
+    function replacing() {
+      return tournamentStatus('live')
+        && onlyChanged(['players', 'answers', 'invited_by', 'people', 'replaced', 'seeds', 'groups'])
+        && request.resource.data.players.hasAll(resource.data.players)
+        && request.resource.data.players.size() == resource.data.players.size() + 1;
+    }
+    function cancelling() {
+      return resource.data.status in ['inviting', 'live'] && request.resource.data.status == 'cancelled'
+        && onlyChanged(['status', 'cancelled_at']);
+    }
+
+    // A finished tournament's champion: written once, by anyone who played in it
+    match /trophies/{tid} {
+      allow read: if member();
+      allow create: if member() && trophyOk(request.resource.data, get(path('tournaments', tid)).data);
+      allow update, delete: if false;
+    }
+    function trophyOk(x, t) {
+      return x.keys().hasOnly(['winner', 'name', 'sport', 'date', 'players'])
+        && t.status == 'live' && me() in t.players && x.winner in t.players
+        && x.name == t.name && x.sport == t.sport && x.date is string && x.players is list;
     }
 
     // ---------- edit / delete requests ----------

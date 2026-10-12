@@ -168,6 +168,13 @@ function pop(entry) {
   entry.returnFocus?.focus?.({ preventScroll: true });
 }
 
+/** Closes every open sheet, alert and pop-up (e.g. before opening the game form from a sheet). */
+export async function closeAllModals() {
+  const open = stack.slice().reverse();
+  open.forEach((entry) => entry.dismiss());
+  if (open.length) await new Promise((r) => setTimeout(r, 380)); // let them slide away
+}
+
 document.addEventListener('keydown', (e) => {
   const top = stack.at(-1);
   if (!top) return;

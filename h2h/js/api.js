@@ -146,6 +146,26 @@ export const enablePush = backend.enablePush || (async () => { throw new ApiErro
 export const disablePush = backend.disablePush || (async () => ({}));
 export const refreshPush = backend.refreshPush || (async () => {});
 
+// Tournaments (see tournament.js): createTournament(token, { name, sport, players, best_of }),
+// respondTournament(token, id, accept), startTournament(token, id), cancelTournament(token, id).
+// demoSimulate(token, id) exists only in demo mode.
+const notHere = async () => {
+  throw new ApiError('Tournaments need the Firebase version.', 'invalid');
+};
+export const createTournament = backend.createTournament || notHere;
+export const inviteToTournament = backend.inviteToTournament || notHere;
+export const updateTournament = backend.updateTournament || notHere;
+export const decideSeries = backend.decideSeries || notHere;
+export const replacePlayer = backend.replacePlayer || notHere;
+export const nudge = backend.nudge || notHere;
+export const recordTrophy = backend.recordTrophy || (async () => ({}));
+export const playerRecords = backend.playerRecords || (async () => ({}));
+export const respondTournament = backend.respondTournament || notHere;
+export const startTournament = backend.startTournament || notHere;
+export const cancelTournament = backend.cancelTournament || notHere;
+export const quitTournament = backend.quitTournament || notHere;
+export const demoSimulate = backend.demoSimulate || null;
+
 // PIN digits for a username (the admin has 8 on Firebase) and the admin console (Firebase only)
 export const pinLength = backend.pinLength || (async () => 4);
 const adminOnly = async () => {

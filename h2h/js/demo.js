@@ -3,8 +3,9 @@
 // friend-only games, soft deletes, validation, network latency) but stores everything in
 // this browser.
 import { uuid, sha256 } from './crypto.js';
-import { getTeam } from './teams.js';
+import { getTeam, teamsFor } from './teams.js';
 import { generateSampleGames } from './sample.js';
+import { drawFor, checkLayout, storedLayout, cleanSettings, cleanName, groupIds, recordOf, buildBracket, accepted, allAnswered, hostOf, nextHost, MIN_PLAYERS, MAX_PLAYERS } from './tournament.js';
 
 const KEY = 'h2h.demo.v3';
 const OFFLINE_KEY = 'h2h.demo.offline';
@@ -19,8 +20,13 @@ const SEED_USERS = [
   { id: 'u_sam', username: 'sam', display_name: 'Sam', color: '#C93400', initial: 'S', seed_pin: '2222' },
   { id: 'u_jordan', username: 'jordan', display_name: 'Jordan', color: '#007A5E', initial: 'J', seed_pin: '3333' },
   { id: 'u_riley', username: 'riley', display_name: 'Riley', color: '#A2338A', initial: 'R', seed_pin: '4444' },
+  // More of Alex's friends, so a demo tournament has a real bracket
+  { id: 'u_casey', username: 'casey', display_name: 'Casey', color: '#0060C7', initial: 'C', seed_pin: '5555' },
+  { id: 'u_morgan', username: 'morgan', display_name: 'Morgan', color: '#8A5A00', initial: 'M', seed_pin: '6666' },
+  { id: 'u_taylor', username: 'taylor', display_name: 'Taylor', color: '#B0263A', initial: 'T', seed_pin: '7777' },
 ];
-const SEED_FRIENDS = [['u_alex', 'u_sam'], ['u_alex', 'u_jordan'], ['u_riley', 'u_sam']];
+const SEED_FRIENDS = [['u_alex', 'u_sam'], ['u_alex', 'u_jordan'], ['u_riley', 'u_sam'], ['u_alex', 'u_casey'], ['u_alex', 'u_morgan'], ['u_alex', 'u_taylor']];
+const ACCEPT_AFTER_MS = 4000; // demo friends answer an invite after a few seconds
 
 const sampleGames = () => [
   ...generateSampleGames('u_alex', 'u_sam'),
@@ -48,6 +54,18 @@ function load() {
   // their most recent 2K game.
   const target = fresh.games.find((g) => g.player1_id === 'u_alex' && g.player2_id === 'u_sam' && g.sport !== 'fifa');
   if (target) fresh.requests = [{ id: 'req-demo-1', game_id: target.id, from_id: 'u_sam', to_id: 'u_alex', kind: 'delete', game: null, status: 'pending', created_at: now, resolved_at: '' }];
+  // A tournament invite from Sam, so the invite looks like something (it starts once Alex answers)
+  const inWeekend = ['u_sam', 'u_alex', 'u_riley', 'u_jordan'];
+  fresh.tournaments = [
+    {
+      id: 'tour-demo-1', name: 'Weekend Cup', sport: '2k', creator: 'u_sam', created_at: now, status: 'inviting',
+      players: inWeekend,
+      answers: { u_sam: 'accepted', u_alex: 'pending', u_riley: 'accepted', u_jordan: 'accepted' },
+      format: 'knockout', group_games: 1, best_of: { early: 3, semi: 3, final: 3 }, draw: 'random', auto_start: true, deadline_days: 0,
+      seeds: null, groups: null, decisions: {}, nudges: {}, started_at: '',
+      people: Object.fromEntries(SEED_USERS.filter((u) => inWeekend.includes(u.id)).map((u) => [u.id, { display_name: u.display_name, username: u.username, color: u.color, initial: u.initial, avatar: '' }])),
+    },
+  ];
   save(fresh);
   return fresh;
 }
@@ -124,7 +142,68 @@ export function createDemoBackend(ApiError) {
     requests: (s.requests || []).filter(
       (r) => (r.from_id === id || r.to_id === id) && (r.status === 'pending' || (['approved', 'declined'].includes(r.status) && r.resolved_at >= since())),
     ),
+    tournaments: answerInvites(s, id).filter((t) => t.players.includes(id)),
+    tournamentGames: s.games.filter((g) => g.tournament_id && !g.deleted && (s.tournaments || []).some((t) => t.id === g.tournament_id && t.players.includes(id))),
+    trophies: trophiesFor(s, [id, ...friendIds(s, id)]),
   });
+  /**
+   * Demo friends answer their invites by themselves a few seconds after they're sent, and a demo
+   * friend's own tournament starts once everyone has answered.
+   */
+  const answerInvites = (s, myId) => {
+    let changed = false;
+    for (const t of s.tournaments || []) {
+      if (t.status !== 'inviting') continue;
+      for (const id of t.players) {
+        const invitedAt = Date.parse(t.invited_at?.[id] || t.created_at);
+        if (Date.now() - invitedAt < ACCEPT_AFTER_MS) continue;
+        if (id !== myId && t.answers[id] === 'pending' && s.users.some((u) => u.id === id && u.seed_pin)) {
+          t.answers[id] = 'accepted';
+          changed = true;
+          // A demo friend brings along one of their own friends (whom you may not know)
+          const outside = !t.brought && friendIds(s, id).find((x) => !t.players.includes(x) && x !== myId);
+          if (outside && t.players.length < MAX_PLAYERS) {
+            addInvite(t, outside, id, s);
+            t.brought = true;
+          }
+        }
+      }
+      if (t.auto_start && allAnswered(t) && accepted(t).length >= MIN_PLAYERS) {
+        startNow(s, t);
+        changed = true;
+      }
+    }
+    if (changed) save(s);
+    return s.tournaments || [];
+  };
+  const profileOf = (s, id) => {
+    const u = pub(s.users.find((x) => x.id === id));
+    return { display_name: u.display_name, username: u.username, color: u.color, initial: u.initial, avatar: u.avatar };
+  };
+  const hostTour = (s, id, myId, status) => {
+    const t = (s.tournaments || []).find((x) => x.id === id);
+    if (!t || hostOf(t) !== myId) throw new ApiError('Only the host can do that.', 'invalid');
+    if (t.status !== status) throw new ApiError(status === 'inviting' ? 'This tournament has already started or was cancelled.' : 'This tournament isn’t being played right now.', 'invalid');
+    return t;
+  };
+  const addInvite = (t, p, by, s) => {
+    t.players.push(p);
+    t.answers[p] = 'pending';
+    (t.invited_by ||= {})[p] = by;
+    t.people[p] = profileOf(s, p);
+    (t.invited_at ||= {})[p] = new Date().toISOString();
+  };
+  /** Draws (or takes the host's) bracket or groups; the tournament goes live. */
+  const startNow = (s, t, layout = null) => {
+    Object.assign(t, { status: 'live', ...storedLayout(layout || drawFor(t, accepted(t), s.games)), started_at: new Date().toISOString() });
+  };
+  /** Trophies of you and your friends, from every finished tournament (the real app stores them). */
+  const trophiesFor = (s, ids) =>
+    (s.tournaments || [])
+      .filter((t) => t.status === 'live')
+      .map((t) => ({ t, b: buildBracket(t, s.games) }))
+      .filter(({ b }) => b.champion && ids.includes(b.champion))
+      .map(({ t, b }) => ({ id: t.id, winner: b.champion, name: t.name, sport: t.sport, date: String(b.rounds.at(-1)[0].decidedAt || '').slice(0, 10), players: (t.seeds || (t.groups || []).flatMap(groupIds)).filter(Boolean) }));
   /** Your PIN, with the wrong-PIN lockout. Throws wrong_pin / locked. */
   const checkPin = async (s, user, pin) => {
     const f = s.fails[user.username] || { count: 0, lockedUntil: 0 };
@@ -356,7 +435,17 @@ export function createDemoBackend(ApiError) {
       const s = load();
       const user = me(s, token);
       const g = clean(game);
-      const err = validateGame(g, user.id, friendIds(s, user.id));
+      let allowed = friendIds(s, user.id);
+      if (g.tournament_id) {
+        // A tournament game: both players are in the bracket (they don't have to be friends)
+        const t = (s.tournaments || []).find((x) => x.id === g.tournament_id);
+        const placed = t ? t.seeds || (t.groups || []).flatMap(groupIds) : [];
+        if (!t || t.status !== 'live' || !placed.includes(g.player1_id) || !placed.includes(g.player2_id) || t.sport !== (g.sport || '2k')) {
+          throw new ApiError('That game can’t count for this tournament.', 'invalid');
+        }
+        allowed = [...allowed, ...placed.filter(Boolean)];
+      }
+      const err = validateGame(g, user.id, allowed);
       if (err) throw new ApiError(err, 'invalid');
       const now = new Date().toISOString();
       const i = s.games.findIndex((x) => x.id === g.id);
@@ -481,6 +570,220 @@ export function createDemoBackend(ApiError) {
       for (const [t, uid] of Object.entries(s.sessions)) if (uid === id) delete s.sessions[t];
       save(s);
       return {};
+    },
+
+    // ---------- tournaments (same rules as the Firebase version) ----------
+
+    async createTournament(token, opts = {}) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const title = cleanName(opts.name);
+      if (!title) throw new ApiError('Give the tournament a name (up to 40 characters).', 'invalid');
+      const invited = [...new Set((opts.players || []).filter((id) => id && id !== user.id))];
+      if (invited.length + 1 < MIN_PLAYERS) throw new ApiError(`Invite at least ${MIN_PLAYERS - 1} friends.`, 'invalid');
+      if (invited.length + 1 > MAX_PLAYERS) throw new ApiError(`A tournament can have up to ${MAX_PLAYERS} players.`, 'invalid');
+      if (invited.some((id) => !friendIds(s, user.id).includes(id))) throw new ApiError('You can only invite your friends.', 'invalid');
+      const t = {
+        id: uuid(),
+        name: title,
+        ...cleanSettings(opts),
+        creator: user.id,
+        created_at: new Date().toISOString(),
+        status: 'inviting',
+        players: [user.id, ...invited],
+        answers: Object.fromEntries([[user.id, 'accepted'], ...invited.map((id) => [id, 'pending'])]),
+        invited_by: Object.fromEntries(invited.map((id) => [id, user.id])),
+        seeds: null,
+        groups: null,
+        decisions: {},
+        nudges: {},
+        started_at: '',
+      };
+      t.people = Object.fromEntries(t.players.map((id) => [id, profileOf(s, id)]));
+      (s.tournaments ||= []).push(t);
+      save(s);
+      return t;
+    },
+
+    async updateTournament(token, id, patch = {}) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = hostTour(s, id, user.id, 'inviting');
+      const title = patch.name != null ? cleanName(patch.name) : t.name;
+      if (!title) throw new ApiError('Give the tournament a name (up to 40 characters).', 'invalid');
+      Object.assign(t, { name: title, ...cleanSettings({ ...t, ...patch }) });
+      save(s);
+      return {};
+    },
+
+    async inviteToTournament(token, id, players) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id);
+      if (!t || t.status !== 'inviting') throw new ApiError('This tournament has already started or was cancelled.', 'invalid');
+      if (t.answers[user.id] !== 'accepted') throw new ApiError('Join the tournament first, then invite your friends.', 'invalid');
+      const fresh = [...new Set(players || [])].filter((p) => p && !t.players.includes(p));
+      if (fresh.some((p) => !friendIds(s, user.id).includes(p))) throw new ApiError('You can only invite your friends.', 'invalid');
+      if (t.players.length + fresh.length > MAX_PLAYERS) throw new ApiError(`A tournament can have up to ${MAX_PLAYERS} players.`, 'invalid');
+      for (const p of fresh) addInvite(t, p, user.id, s);
+      save(s);
+      return {};
+    },
+
+    async respondTournament(token, id, accept) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id && x.players.includes(user.id));
+      if (!t || t.status !== 'inviting') throw new ApiError('This tournament has already started or was cancelled.', 'invalid');
+      if (t.creator === user.id) throw new ApiError('You’re the host. Cancel the tournament instead.', 'invalid');
+      t.answers[user.id] = accept ? 'accepted' : 'declined';
+      if (t.auto_start && allAnswered(t) && accepted(t).length >= MIN_PLAYERS) startNow(s, t);
+      save(s);
+      return {};
+    },
+
+    async startTournament(token, id, layout = null) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = hostTour(s, id, user.id, 'inviting');
+      if (accepted(t).length < MIN_PLAYERS) throw new ApiError(`At least ${MIN_PLAYERS} players need to join first.`, 'invalid');
+      if (t.draw === 'custom') {
+        const problem = layout ? checkLayout(t, layout, accepted(t)) : 'Set up the bracket first.';
+        if (problem) throw new ApiError(problem, 'invalid');
+      }
+      startNow(s, t, t.draw === 'custom' ? layout : null);
+      save(s);
+      return {};
+    },
+
+    async cancelTournament(token, id) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id);
+      if (!t || hostOf(t) !== user.id) throw new ApiError('Only the host can do that.', 'invalid');
+      Object.assign(t, { status: 'cancelled', cancelled_at: new Date().toISOString() });
+      save(s);
+      return {};
+    },
+
+    async quitTournament(token, id) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id && x.players.includes(user.id));
+      if (!t) return {};
+      if (t.status === 'inviting') {
+        if (t.creator === user.id) throw new ApiError('You’re the host. Cancel the tournament instead.', 'invalid');
+        t.answers[user.id] = 'declined';
+      } else if (t.status === 'live' && t.answers[user.id] === 'accepted') {
+        const next = nextHost(t, user.id);
+        if (next) t.host = next;
+        t.answers[user.id] = 'left';
+        (t.left ||= {})[user.id] = new Date().toISOString();
+      }
+      save(s);
+      return {};
+    },
+
+    async decideSeries(token, id, key, winner) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = hostTour(s, id, user.id, 'live');
+      t.decisions ||= {};
+      if (winner) t.decisions[key] = { winner, at: new Date().toISOString() };
+      else delete t.decisions[key];
+      save(s);
+      return {};
+    },
+
+    async replacePlayer(token, id, oldId, newId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = hostTour(s, id, user.id, 'live');
+      const placed = t.seeds || (t.groups || []).flatMap(groupIds);
+      if (!placed.includes(oldId)) throw new ApiError('That player isn’t in the bracket.', 'invalid');
+      if (placed.includes(newId)) throw new ApiError('They’re already in it.', 'invalid');
+      if (!friendIds(s, user.id).includes(newId)) throw new ApiError('You can only bring in your friends.', 'invalid');
+      const swap = (x) => (x === oldId ? newId : x);
+      if (t.seeds) t.seeds = t.seeds.map(swap);
+      else t.groups = t.groups.map((g) => ({ ids: groupIds(g).map(swap) }));
+      if (!t.players.includes(newId)) t.players.push(newId);
+      t.answers[newId] = 'accepted';
+      (t.invited_by ||= {})[newId] = user.id;
+      t.people[newId] = profileOf(s, newId);
+      (t.replaced ||= {})[oldId] = newId;
+      save(s);
+      return {};
+    },
+
+    async nudge(token, id, toId) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id && x.status === 'live');
+      if (!t || !t.players.includes(user.id) || !t.players.includes(toId)) throw new ApiError('You’re not both in this tournament.', 'invalid');
+      const last = t.nudges?.[toId];
+      if (last?.from === user.id && Date.now() - Date.parse(last.at) < 3600000) throw new ApiError('You nudged them less than an hour ago.', 'invalid');
+      (t.nudges ||= {})[toId] = { from: user.id, at: new Date().toISOString() };
+      save(s);
+      return {};
+    },
+
+    async recordTrophy() {
+      return {}; // the demo works trophies out from the tournaments themselves
+    },
+
+    async playerRecords(token, ids, sport) {
+      await delay();
+      const s = load();
+      return Object.fromEntries(ids.map((id) => [id, recordOf(id, s.games, sport)]));
+    },
+
+    /** Demo only: plays out every game you're not in that's ready (group games, then series). */
+    async demoSimulate(token, id) {
+      await net();
+      const s = load();
+      const user = me(s, token);
+      const t = (s.tournaments || []).find((x) => x.id === id && x.status === 'live');
+      if (!t) return { played: 0 };
+      const teams = teamsFor(t.sport).map((x) => x.key);
+      const pick = () => teams[Math.floor(Math.random() * teams.length)];
+      const fifa = t.sport === 'fifa';
+      let played = 0;
+      const play = (a, b, stage) => {
+        const hi = fifa ? 1 + Math.floor(Math.random() * 4) : 90 + Math.floor(Math.random() * 30);
+        const lo = Math.max(0, hi - 1 - Math.floor(Math.random() * (fifa ? hi : 12)));
+        const aWins = Math.random() < 0.5;
+        const stamp = new Date(Date.now() + played).toISOString();
+        s.games.push({
+          id: uuid(), sport: t.sport, date: stamp.slice(0, 10), overtime: false, note: '', player1_id: a, player2_id: b,
+          player1_score: aWins ? hi : lo, player2_score: aWins ? lo : hi, player1_team: pick(), player2_team: pick(), player1_pens: '', player2_pens: '',
+          tournament_id: t.id, ...(stage ? { tournament_stage: stage } : {}), created_by: a, created_at: stamp, updated_at: stamp, deleted: false,
+        });
+        played++;
+      };
+      for (let guard = 0; guard < 300; guard++) {
+        const b = buildBracket(t, s.games);
+        if (b.stage === 'groups') {
+          const pair = b.groups.flatMap((g) => g.pairs).find((p) => !p.done && p.a !== user.id && p.b !== user.id);
+          if (!pair) break;
+          play(pair.a, pair.b, 'group');
+          continue;
+        }
+        const ready = b.rounds.flat().find((m) => m.winner === undefined && m.a && m.b && m.a !== user.id && m.b !== user.id);
+        if (!ready) break;
+        play(ready.a, ready.b, null);
+      }
+      save(s);
+      return { played };
     },
   };
 }
