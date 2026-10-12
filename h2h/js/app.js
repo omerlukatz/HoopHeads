@@ -1230,6 +1230,35 @@ function teamTile(side, abbr, opponentName = oppName()) {
  * `id` edits an existing game; otherwise a new game pre-filled with the last matchup.
  * From a tournament bracket: `opponent` (who may not be your friend) and `tournament` are given.
  */
+// A new game you started but didn't save (closed, cancelled, or left the app) is kept per account
+// and game mode, and comes back the next time you open New Game. Saving it clears it.
+const GAME_DRAFT_KEY = (sport) => `h2h.gameDraft.v1:${meId()}:${sport}`;
+const GAME_DRAFT_MAX_AGE = 3 * 24 * 3600 * 1000;
+function loadGameDraft(sport) {
+  try {
+    const d = JSON.parse(localStorage.getItem(GAME_DRAFT_KEY(sport)) || 'null');
+    return d && Date.now() - d.savedAt < GAME_DRAFT_MAX_AGE ? d : null;
+  } catch {
+    return null;
+  }
+}
+function storeGameDraft(sport, d) {
+  try {
+    const worth = d.myScore !== '' || d.oppScore !== '' || d.myTeam || d.oppTeam || d.note || d.myPens !== '' || d.oppPens !== '';
+    if (worth) localStorage.setItem(GAME_DRAFT_KEY(sport), JSON.stringify({ ...d, savedAt: Date.now() }));
+    else localStorage.removeItem(GAME_DRAFT_KEY(sport));
+  } catch {
+    /* storage unavailable: nothing to keep */
+  }
+}
+const clearGameDraft = (sport) => {
+  try {
+    localStorage.removeItem(GAME_DRAFT_KEY(sport));
+  } catch {
+    /* ignore */
+  }
+};
+
 function openGameSheet({ id = null, opponent: forced = null, tournament = null } = {}) {
   if (document.documentElement.classList.contains('has-modal') || !state.session || isLocked()) return;
   if (!forced && !store.rival()) {
@@ -1248,9 +1277,16 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
   // The sport is fixed when editing; a new game is logged in the current game mode (or the tournament's)
   const sport = editing ? sportOf(source) : tournament ? tournament.sport : state.mode;
   const fifa = sport === 'fifa';
+  // An unsaved new game comes back (against the same opponent, if you came from a bracket)
+  const kept = editing ? null : loadGameDraft(sport);
+  const keptOpponent = kept && state.friends.find((f) => f.id === kept.opponentId);
+  const restored = Boolean(kept && (forced ? kept.opponentId === forced.id : keptOpponent));
+  if (restored && !forced) opponent = keptOpponent;
   const draft = editing
     ? { date: view.date, myTeam: view.myTeam, oppTeam: view.oppTeam, myScore: view.myScore, oppScore: view.oppScore, overtime: view.overtime, note: view.note, myPens: view.myPens ?? '', oppPens: view.oppPens ?? '' }
-    : { date: todayISO(), myTeam: null, oppTeam: null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' }; // new games start with both teams empty
+    : restored
+      ? { date: kept.date && kept.date <= todayISO() ? kept.date : todayISO(), myTeam: kept.myTeam || null, oppTeam: kept.oppTeam || null, myScore: kept.myScore ?? '', oppScore: kept.oppScore ?? '', overtime: Boolean(kept.overtime), note: kept.note || '', myPens: kept.myPens ?? '', oppPens: kept.oppPens ?? '' }
+      : { date: todayISO(), myTeam: null, oppTeam: null, myScore: '', oppScore: '', overtime: false, note: '', myPens: '', oppPens: '' }; // new games start with both teams empty
   const opp = opponent.display_name;
   const canSwitch = !editing && !forced && state.friends.length > 1;
   // Editing a saved game sends a request; a game that hasn't synced yet is still yours to change
@@ -1272,6 +1308,7 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
     </header>
     <form id="game-form" class="sheet__body game-form" novalidate autocomplete="off">
       ${banner ? `<p class="edit-banner">${banner}</p>` : ''}
+      ${restored ? '<p class="edit-banner" data-draft-banner>Picked up where you left off. <button type="button" class="link" data-sheet="start-over">Start Over</button></p>' : ''}
       <div class="matchup">
         <div class="side">
           <span class="side__name">You</span>
@@ -1366,6 +1403,11 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
     saveBtns.forEach((b) => (b.disabled = !ok));
     return ok;
   };
+  // Keep what you've typed or picked so far (only after you change something)
+  let saved = false;
+  const keep = () => {
+    if (!editing && !saved) storeGameDraft(sport, { ...read(), note: form.note.value, opponentId: opponent.id });
+  };
 
   for (const input of $$('.score-input, .pens-input', content)) {
     input.addEventListener('input', () => {
@@ -1377,6 +1419,8 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
   form.myScore.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), form.oppScore.focus()));
   form.addEventListener('input', validate);
   form.addEventListener('change', validate);
+  form.addEventListener('input', keep);
+  form.addEventListener('change', keep);
 
   const sheet = openSheet({ content, labelledBy: 'game-sheet-title', initialFocus: '#score-me' });
 
@@ -1396,6 +1440,7 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
       tile.addEventListener('animationend', () => tile.classList.remove('is-popping'), { once: true });
       oppBtn.focus({ preventScroll: true });
       validate();
+      keep();
       return;
     }
     const pick = e.target.closest('[data-pick]');
@@ -1411,10 +1456,17 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
       tile.addEventListener('animationend', () => tile.classList.remove('is-popping'), { once: true });
       tile.focus({ preventScroll: true });
       validate();
+      keep();
       return;
     }
     const act = e.target.closest('[data-sheet]')?.dataset.sheet;
     if (act === 'cancel') sheet.close();
+    if (act === 'start-over') {
+      saved = true; // stop the closing sheet from keeping it again
+      clearGameDraft(sport);
+      await sheet.close();
+      openGameSheet({ opponent: forced, tournament });
+    }
     if (act === 'delete') {
       sheet.close();
       removeGame(source.id, opponent.display_name);
@@ -1480,6 +1532,8 @@ function openGameSheet({ id = null, opponent: forced = null, tournament = null }
     }
     if (editing) store.updateGame({ ...neutral, id: source.id });
     else {
+      saved = true;
+      clearGameDraft(sport);
       store.addGame(neutral);
       const isFriend = state.friends.some((f) => f.id === opponent.id);
       if (isFriend && !everyone() && opponent.id !== state.rivalId) store.setRival(opponent.id); // show the rivalry you just logged

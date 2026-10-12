@@ -2080,6 +2080,7 @@ button.sync::after { content: ""; position: absolute; inset: -8px -4px; }
 .notif-status--declined { color: var(--loss-text); font-weight: 600; }
 .tag--request { color: var(--ot-text); font-weight: 600; }
 .edit-banner { padding: 10px 14px; border-radius: var(--r-control); background: var(--ot-tint); color: var(--ot-text); font-size: var(--fs-footnote); font-weight: 500; }
+.edit-banner .link { font-size: inherit; font-weight: 600; }
 
 /* ============ Pull to refresh (Dashboard) ============ */
 
